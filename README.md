@@ -1,36 +1,125 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Jury Evaluation Platform
 
-## Getting Started
+A premium real-time evaluation platform built for hackathons, innovation challenges, startup competitions, project expos, demo days, and jury-based events.
 
-First, run the development server:
+The platform enables judges to securely evaluate participants, administrators to monitor progress, and organizers to reveal final rankings through a cinematic animated leaderboard experience.
+
+---
+
+## Features
+
+### Judge Panel
+- Secure authentication
+- Judge dashboard
+- Assigned participant/team evaluation
+- Real-time scoring
+- Weighted scoring criteria
+- Draft save functionality
+- Final submission lock
+- Progress tracking
+- Evaluation comments
+- Timer support
+
+---
+
+### Admin Panel
+- Mission control dashboard
+- Judge progress monitoring
+- Team/project evaluation overview
+- Hidden live leaderboard
+- Open / Close evaluation
+- Lock / Unlock leaderboard
+- Arm finale mode
+- Launch finale reveal
+- Export CSV
+- Export PDF
+- Reset evaluations
+- Audit logs
+
+---
+
+### Finale Experience
+- Cinematic leaderboard reveal
+- Animated ranking transitions
+- Score counter animations
+- Podium reveal
+- Confetti celebration
+- Winner announcement screen
+- Glitch loading transitions
+
+---
+
+## Use Cases
+
+This platform can be used for:
+
+- Hackathons
+- Startup pitch competitions
+- College project expos
+- Innovation challenges
+- Coding contests
+- Product demo days
+- Business plan competitions
+- Design showcases
+- Research project evaluations
+- Any jury-based event
+
+---
+
+## Tech Stack
+
+### Frontend
+- Next.js 14+
+- TypeScript
+- Tailwind CSS
+- shadcn/ui
+- Framer Motion
+- GSAP
+- Lucide React
+
+### Backend
+- Next.js API Routes
+- PostgreSQL / Neon Database
+- Prisma ORM
+- NextAuth / Auth.js
+- bcrypt
+
+### Optional Realtime
+- Socket.io
+or
+- Pusher
+or
+- Supabase Realtime
+
+---
+
+## Project Structure
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+app/
+├── admin/
+│   ├── dashboard/
+│   ├── leaderboard/
+│   └── finale/
+│
+├── judge/
+│   ├── dashboard/
+│   └── evaluation/[entityId]/
+│
+├── login/
+│
+components/
+├── admin/
+├── judge/
+├── leaderboard/
+├── animations/
+├── ui/
+│
+lib/
+├── prisma.ts
+├── auth.ts
+├── scoring.ts
+├── utils.ts
+│
+prisma/
+└── schema.prisma
