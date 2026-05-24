@@ -87,7 +87,7 @@ export default function LeaderboardPage() {
 
           <div className="w-full bg-cyber-bg-darker/60 border border-cyber-red/15 p-4 font-mono text-[10px] text-gray-400 text-left flex flex-col gap-1">
             <span className="text-cyber-red font-bold uppercase">📟 TELEMETRY SEC-STATUS:</span>
-            <span>⚡ CHANNEL: PALS-RESULTS-FEED-8443</span>
+            <span>⚡ CHANNEL: SCORESPHERE-RESULTS-FEED-8443</span>
             <span>⚡ ENCRYPTION_MODE: CYCLONE-AES-GCM-256</span>
             <span>⚡ SYNC STATUS: STANDBY_PENDING_BROADCAST_TRIGGER</span>
           </div>
@@ -144,7 +144,7 @@ export default function LeaderboardPage() {
             </span>
             <div>
               <h1 className="font-orbitron font-extrabold text-lg text-white tracking-widest text-glow-magenta uppercase">
-                PALS - BMSIT&M CHAMPIONS LIST
+                SCORESPHERE CHAMPIONS LIST
               </h1>
               <span className="font-mono text-[9px] text-cyber-magenta tracking-widest uppercase block mt-0.5">
                 🔴 LIVE SCORE BROADCAST IN EFFECT

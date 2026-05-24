@@ -102,7 +102,7 @@ export default function JudgeAuthPage() {
           <div className="absolute top-0 right-0 w-2 h-2 bg-cyber-cyan animate-ping" />
           <div className="flex items-center gap-2 border-b border-cyber-cyan/20 pb-3 mb-4">
             <Cpu className="w-5 h-5 animate-spin" />
-            <span className="font-orbitron font-bold tracking-widest text-sm">PALS_SYSTEM_INITIALIZE</span>
+            <span className="font-orbitron font-bold tracking-widest text-sm">SCORESPHERE_INITIALIZE</span>
           </div>
           <p className="text-xs">⚡ SECURE CONNECTION PROTOCOL LOADED...</p>
           <p className="text-xs">⚡ SYNCING STORAGE NODES...</p>
@@ -134,7 +134,7 @@ export default function JudgeAuthPage() {
           <div className="flex justify-center items-center gap-2 mb-1.5">
             <Radio className="w-5 h-5 text-cyber-cyan animate-pulse" />
             <span className="font-mono text-xs text-cyber-cyan/80 tracking-widest font-bold uppercase">
-              PALS - BMSIT&M HACKATHON
+              SCORESPHERE HACKATHON
             </span>
           </div>
           <h1 className="font-orbitron font-extrabold text-2xl text-white tracking-widest text-glow-cyan">

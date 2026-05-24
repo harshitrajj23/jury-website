@@ -15,8 +15,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "PALS - BMSIT&M Hackathon Portal",
-  description: "Cyberpunk Hackathon Judge Scoring & Evaluation Portal for PALS - BMSIT&M",
+  title: "SCORESPHERE - Hackathon Portal",
+  description: "Cyberpunk Hackathon Judge Scoring & Evaluation Portal for SCORESPHERE",
 };
 
 export default function RootLayout({
