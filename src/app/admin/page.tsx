@@ -301,7 +301,7 @@ export default function AdminPage() {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `PALS_BMSITM_Evaluation_Results_${Date.now()}.csv`);
+    link.setAttribute("download", `SCORESPHERE_Evaluation_Results_${Date.now()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -329,7 +329,7 @@ export default function AdminPage() {
             <div className="flex justify-center items-center gap-2 mb-1.5">
               <ShieldCheck className="w-5 h-5 text-cyber-magenta animate-pulse" />
               <span className="font-mono text-xs text-cyber-magenta/80 tracking-widest font-bold uppercase">
-                PALS - CENTRAL SYSTEM
+                SCORESPHERE - CENTRAL SYSTEM
               </span>
             </div>
             <h1 className="font-orbitron font-extrabold text-2xl text-white tracking-widest text-glow-magenta">
@@ -381,7 +381,7 @@ export default function AdminPage() {
           </form>
         </div>
         <footer className="mt-8 text-center text-[10px] text-gray-600 font-mono tracking-widest uppercase">
-          SECURE PROTOCOL CLOUD INTEGRATED • BMSIT&M © 2026
+          SECURE PROTOCOL CLOUD INTEGRATED • SCORESPHERE © 2026
         </footer>
       </div>
     );
@@ -410,7 +410,7 @@ export default function AdminPage() {
             </span>
             <div>
               <h1 className="font-orbitron font-extrabold text-lg text-white tracking-widest text-glow-magenta uppercase">
-                PALS - BMSIT&M ADMIN CONSOLE
+                SCORESPHERE ADMIN CONSOLE
               </h1>
               <div className="flex items-center gap-2 mt-0.5 font-mono text-[9px] text-cyber-magenta tracking-wider">
                 <span className="w-1.5 h-1.5 rounded-full bg-cyber-magenta animate-ping" />
@@ -604,7 +604,7 @@ export default function AdminPage() {
                 <CyberInput
                   variant="magenta"
                   label="ASSIGN ACCESS KEY (PASSWORD)"
-                  placeholder="e.g. pals1"
+                  placeholder="e.g. score1"
                   value={newJudgePass}
                   onChange={(e) => setNewJudgePass(e.target.value)}
                   disabled={actionLoading}

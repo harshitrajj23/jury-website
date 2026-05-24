@@ -214,7 +214,7 @@ export default function JudgeDashboardPage() {
             </span>
             <div>
               <h1 className="font-orbitron font-extrabold text-lg text-white tracking-widest text-glow-cyan uppercase">
-                PALS - BMSIT&M JUDGING DECK
+                SCORESPHERE JUDGING DECK
               </h1>
               <div className="flex items-center gap-2 mt-0.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-cyber-green animate-ping" />
