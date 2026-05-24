@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { 
   LogOut, 
@@ -12,7 +12,9 @@ import {
   Save, 
   AlertTriangle,
   RotateCcw,
-  Sparkles
+  Sparkles,
+  Wifi,
+  WifiOff
 } from "lucide-react";
 import { 
   getTeams, 
@@ -23,6 +25,7 @@ import {
   LeaderboardEntry
 } from "@/lib/db";
 import { Team, ScoringCriteria, ScoreRecord, Judge } from "@/lib/types";
+import { useRealtimeSync } from "@/lib/useRealtimeSync";
 import CyberButton from "@/components/CyberButton";
 import CyberInput from "@/components/CyberInput";
 import Timer from "@/components/Timer";
@@ -98,6 +101,19 @@ export default function JudgeDashboardPage() {
       setLoading(false);
     }
   };
+
+  // Realtime WebSocket sync — auto-refresh when DB changes
+  const handleRealtimeChange = useCallback(() => {
+    if (judge) {
+      fetchData(judge.id);
+    }
+  }, [judge]);
+
+  const realtimeStatus = useRealtimeSync({
+    tables: ["pals_scores", "pals_teams", "pals_config"],
+    onDataChange: handleRealtimeChange,
+    enabled: !!judge,
+  });
 
   const handleSelectTeam = (
     team: Team, 
@@ -217,9 +233,9 @@ export default function JudgeDashboardPage() {
                 SCORESPHERE JUDGING DECK
               </h1>
               <div className="flex items-center gap-2 mt-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-cyber-green animate-ping" />
+                <span className={`w-1.5 h-1.5 rounded-full ${realtimeStatus === "connected" ? "bg-cyber-green animate-ping" : realtimeStatus === "connecting" ? "bg-cyber-yellow animate-pulse" : "bg-cyber-red"}`} />
                 <span className="font-mono text-[9px] text-cyber-cyan tracking-wider">
-                  LINK ESTABLISHED • JUDGE: {judge.name.toUpperCase()} ({judge.designation.toUpperCase()})
+                  {realtimeStatus === "connected" ? "⚡ LIVE" : realtimeStatus === "connecting" ? "SYNCING" : "OFFLINE"} • JUDGE: {judge.name.toUpperCase()} ({judge.designation.toUpperCase()})
                 </span>
               </div>
             </div>

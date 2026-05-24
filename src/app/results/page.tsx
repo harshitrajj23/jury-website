@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { 
   Trophy, 
@@ -13,6 +13,7 @@ import {
   UserCheck
 } from "lucide-react";
 import { getLeaderboard, getConfig, initDatabase, LeaderboardEntry } from "@/lib/db";
+import { useRealtimeSync } from "@/lib/useRealtimeSync";
 import CyberButton from "@/components/CyberButton";
 
 export default function LeaderboardPage() {
@@ -44,6 +45,16 @@ export default function LeaderboardPage() {
       setRefreshing(false);
     }
   };
+
+  // Realtime WebSocket sync — auto-refresh when scores or config change
+  const handleRealtimeChange = useCallback(() => {
+    fetchLeaderboard();
+  }, []);
+
+  const realtimeStatus = useRealtimeSync({
+    tables: ["pals_scores", "pals_config"],
+    onDataChange: handleRealtimeChange,
+  });
 
   const hasJudgeSession = typeof window !== "undefined" && !!sessionStorage.getItem("judge_session");
 
@@ -89,7 +100,7 @@ export default function LeaderboardPage() {
             <span className="text-cyber-red font-bold uppercase">📟 TELEMETRY SEC-STATUS:</span>
             <span>⚡ CHANNEL: SCORESPHERE-RESULTS-FEED-8443</span>
             <span>⚡ ENCRYPTION_MODE: CYCLONE-AES-GCM-256</span>
-            <span>⚡ SYNC STATUS: STANDBY_PENDING_BROADCAST_TRIGGER</span>
+            <span>⚡ REALTIME LINK: {realtimeStatus === "connected" ? "WEBSOCKET ACTIVE" : realtimeStatus === "connecting" ? "ESTABLISHING..." : "DISCONNECTED"}</span>
           </div>
 
           <div className="flex gap-4 w-full mt-2 justify-center">
@@ -147,7 +158,7 @@ export default function LeaderboardPage() {
                 SCORESPHERE CHAMPIONS LIST
               </h1>
               <span className="font-mono text-[9px] text-cyber-magenta tracking-widest uppercase block mt-0.5">
-                🔴 LIVE SCORE BROADCAST IN EFFECT
+                {realtimeStatus === "connected" ? "🔴 LIVE" : "⏳ SYNCING"} SCORE BROADCAST IN EFFECT
               </span>
             </div>
           </div>

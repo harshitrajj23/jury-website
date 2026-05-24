@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { 
   ShieldCheck, 
   Users, 
@@ -37,6 +37,7 @@ import {
   LeaderboardEntry
 } from "@/lib/db";
 import { Judge, Team, ScoringCriteria, ScoreRecord, AppConfig } from "@/lib/types";
+import { useRealtimeSync } from "@/lib/useRealtimeSync";
 import CyberButton from "@/components/CyberButton";
 import CyberInput from "@/components/CyberInput";
 
@@ -104,6 +105,19 @@ export default function AdminPage() {
       setDbLoading(false);
     }
   };
+
+  // Realtime WebSocket sync — auto-refresh when DB changes
+  const handleRealtimeChange = useCallback(() => {
+    if (isAdmin) {
+      fetchDbData();
+    }
+  }, [isAdmin]);
+
+  const realtimeStatus = useRealtimeSync({
+    tables: ["pals_scores", "pals_teams", "pals_judges", "pals_config"],
+    onDataChange: handleRealtimeChange,
+    enabled: isAdmin,
+  });
 
   const handleSaveTimer = async () => {
     setActionLoading(true);
@@ -411,8 +425,8 @@ export default function AdminPage() {
                 SCORESPHERE ADMIN CONSOLE
               </h1>
               <div className="flex items-center gap-2 mt-0.5 font-mono text-[9px] text-cyber-magenta tracking-wider">
-                <span className="w-1.5 h-1.5 rounded-full bg-cyber-magenta animate-ping" />
-                STATUS: ROOT_SESSION_ACTIVE • SEC-KEY SYNCED
+                <span className={`w-1.5 h-1.5 rounded-full ${realtimeStatus === "connected" ? "bg-cyber-green animate-ping" : realtimeStatus === "connecting" ? "bg-cyber-yellow animate-pulse" : "bg-cyber-red"}`} />
+                {realtimeStatus === "connected" ? "⚡ LIVE SYNC" : realtimeStatus === "connecting" ? "SYNCING..." : "OFFLINE"} • ROOT_SESSION_ACTIVE
               </div>
             </div>
           </div>
