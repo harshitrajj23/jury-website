@@ -74,11 +74,12 @@ export default function AdminPage() {
 
   useEffect(() => {
     initDatabase();
-    
-    // Bypassing login check to keep admin console open for testing
-    sessionStorage.setItem("admin_session", "authorized");
-    setIsAdmin(true);
-    fetchDbData();
+    // Check if already logged in from a previous session
+    const session = sessionStorage.getItem("admin_session");
+    if (session === "authorized") {
+      setIsAdmin(true);
+      fetchDbData();
+    }
   }, []);
 
   const fetchDbData = async () => {
@@ -122,7 +123,14 @@ export default function AdminPage() {
     setAuthLoading(true);
     setAuthError("");
 
-    // Accept any credentials immediately
+    const ADMIN_PASSWORD = "admin123";
+
+    if (adminPass !== ADMIN_PASSWORD) {
+      setAuthError("INVALID PASSWORD. ACCESS DENIED.");
+      setAuthLoading(false);
+      return;
+    }
+
     sessionStorage.setItem("admin_session", "authorized");
     setIsAdmin(true);
     fetchDbData();
@@ -343,17 +351,7 @@ export default function AdminPage() {
           <form onSubmit={handleAdminLogin} className="flex flex-col gap-5">
             <CyberInput
               variant="magenta"
-              label="ADMIN LOGIN IDENT"
-              placeholder="e.g. admin"
-              value={adminUser}
-              onChange={(e) => setAdminUser(e.target.value)}
-              disabled={authLoading}
-              required
-            />
-
-            <CyberInput
-              variant="magenta"
-              label="DECK CRYPTO SECRET KEY"
+              label="ADMIN PASSWORD"
               type="password"
               placeholder="••••••••"
               value={adminPass}
