@@ -2,70 +2,92 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { KeyRound, User, Radio, Cpu } from "lucide-react";
-import { getJudges, initDatabase } from "@/lib/db";
+import { KeyRound, User, Radio, Cpu, BadgeCheck, Briefcase } from "lucide-react";
+import { getJudges, addJudge, initDatabase } from "@/lib/db";
 import CyberInput from "@/components/CyberInput";
 import CyberButton from "@/components/CyberButton";
 
-export default function JudgeLoginPage() {
+export default function JudgeAuthPage() {
   const router = useRouter();
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [isLogin, setIsLogin] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   const [booting, setBooting] = useState(true);
 
-  // Initialize DB on Mount
+  // Form states
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [designation, setDesignation] = useState("");
+
   useEffect(() => {
     initDatabase();
-    // Simulate terminal boot sequence
-    const timer = setTimeout(() => {
-      setBooting(false);
-    }, 800);
+    const timer = setTimeout(() => setBooting(false), 800);
     return () => clearTimeout(timer);
   }, []);
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!username.trim() || !password.trim()) {
-      setError("Please fill all authorization fields.");
-      return;
-    }
-
-    setLoading(true);
+  const resetForm = () => {
+    setUsername("");
+    setPassword("");
+    setFullName("");
+    setDesignation("");
     setError("");
+  };
+
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
 
     try {
       const judges = await getJudges();
-      let matchedJudge = judges.find(
-        (j) => j.username.toLowerCase() === username.trim().toLowerCase()
-      );
+      const usernameVal = username.trim().toLowerCase();
 
-      if (!matchedJudge) {
-        // Dynamic login fallback: automatically register new judge since the user wants to login with any credentials
-        const usernameVal = username.trim();
-        const cleanName = usernameVal.includes("@")
-          ? usernameVal.split("@")[0].charAt(0).toUpperCase() + usernameVal.split("@")[0].slice(1)
-          : usernameVal.charAt(0).toUpperCase() + usernameVal.slice(1);
+      if (isLogin) {
+        // --- LOGIN ---
+        const matched = judges.find(
+          (j) => j.username.toLowerCase() === usernameVal && j.password === password
+        );
+        if (!matched) {
+          setError("INVALID CREDENTIALS. ACCESS DENIED.");
+          setLoading(false);
+          return;
+        }
+        sessionStorage.setItem("judge_session", JSON.stringify({
+          id: matched.id,
+          username: matched.username,
+          name: matched.name,
+          designation: matched.designation,
+        }));
+        router.push("/dashboard");
 
-        const { addJudge } = await import("@/lib/db");
-        matchedJudge = await addJudge({
-          username: usernameVal.toLowerCase(),
-          name: `Judge ${cleanName}`,
-          designation: "Guest Jurist",
-          password: password,
+      } else {
+        // --- REGISTER ---
+        if (!fullName.trim() || !designation.trim() || !usernameVal || !password) {
+          setError("ALL FIELDS ARE REQUIRED FOR REGISTRATION.");
+          setLoading(false);
+          return;
+        }
+        const exists = judges.find((j) => j.username.toLowerCase() === usernameVal);
+        if (exists) {
+          setError("USERNAME ALREADY IN USE. CHOOSE ANOTHER.");
+          setLoading(false);
+          return;
+        }
+        const newJudge = await addJudge({
+          username: usernameVal,
+          name: fullName.trim(),
+          designation: designation.trim(),
+          password,
         });
+        sessionStorage.setItem("judge_session", JSON.stringify({
+          id: newJudge.id,
+          username: newJudge.username,
+          name: newJudge.name,
+          designation: newJudge.designation,
+        }));
+        router.push("/dashboard");
       }
-
-      // Authenticated! Store in sessionStorage
-      sessionStorage.setItem("judge_session", JSON.stringify({
-        id: matchedJudge.id,
-        username: matchedJudge.username,
-        name: matchedJudge.name,
-        designation: matchedJudge.designation,
-      }));
-      
-      router.push("/dashboard");
     } catch {
       setError("TRANSMISSION ERROR: DATABASE DISCONNECTED.");
     } finally {
@@ -95,13 +117,13 @@ export default function JudgeLoginPage() {
 
   return (
     <div className="min-h-screen flex flex-col justify-center items-center p-4 relative overflow-hidden">
-      {/* Background neon effect */}
+      {/* Background neon blobs */}
       <div className="absolute w-[300px] h-[300px] bg-cyber-cyan/5 rounded-full blur-[100px] top-[10%] left-[20%] pointer-events-none" />
       <div className="absolute w-[300px] h-[300px] bg-cyber-magenta/5 rounded-full blur-[100px] bottom-[15%] right-[20%] pointer-events-none" />
 
       {/* Main Terminal Frame */}
-      <div className="w-full max-w-md cyber-glass p-8 border border-cyber-cyan/25 relative flex flex-col gap-6">
-        {/* Glow corners */}
+      <div className="w-full max-w-md cyber-glass p-8 border border-cyber-cyan/25 relative flex flex-col gap-6 z-10">
+        {/* Corner accents */}
         <span className="absolute top-0 left-0 w-2 h-2 bg-cyber-cyan" />
         <span className="absolute bottom-0 right-0 w-2 h-2 bg-cyber-cyan" />
         <span className="absolute top-0 right-0 w-2 h-2 bg-cyber-cyan/30" />
@@ -119,17 +141,73 @@ export default function JudgeLoginPage() {
             JURY PORTAL
           </h1>
           <p className="font-sans text-[10px] text-gray-500 tracking-wider uppercase mt-1">
-            BMS Institute of Technology & Management, Bengaluru
+            BMS Institute of Technology &amp; Management, Bengaluru
           </p>
         </div>
 
-        {/* Form Container */}
-        <form onSubmit={handleLogin} className="flex flex-col gap-5">
+        {/* Tab Switcher */}
+        <div className="flex w-full border border-cyber-cyan/30 font-orbitron text-xs">
+          <button
+            type="button"
+            className={`flex-1 py-2.5 transition-all duration-300 tracking-widest ${
+              isLogin
+                ? "bg-cyber-cyan text-black font-bold"
+                : "bg-transparent text-gray-400 hover:bg-cyber-cyan/10"
+            }`}
+            onClick={() => { setIsLogin(true); resetForm(); }}
+          >
+            AUTHORIZE
+          </button>
+          <button
+            type="button"
+            className={`flex-1 py-2.5 transition-all duration-300 tracking-widest ${
+              !isLogin
+                ? "bg-cyber-cyan text-black font-bold"
+                : "bg-transparent text-gray-400 hover:bg-cyber-cyan/10"
+            }`}
+            onClick={() => { setIsLogin(false); resetForm(); }}
+          >
+            REGISTER
+          </button>
+        </div>
+
+        {/* Auth Form */}
+        <form onSubmit={handleAuth} className="flex flex-col gap-4">
+
+          {/* Register-only fields */}
+          {!isLogin && (
+            <>
+              <div className="relative">
+                <BadgeCheck className="absolute right-3 bottom-3 w-4 h-4 text-cyber-cyan/50" />
+                <CyberInput
+                  label="Full Name"
+                  placeholder="e.g. Dr. Sarah Connor"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  disabled={loading}
+                  required
+                />
+              </div>
+              <div className="relative">
+                <Briefcase className="absolute right-3 bottom-3 w-4 h-4 text-cyber-cyan/50" />
+                <CyberInput
+                  label="Designation / Institution"
+                  placeholder="e.g. Professor, CSE Dept"
+                  value={designation}
+                  onChange={(e) => setDesignation(e.target.value)}
+                  disabled={loading}
+                  required
+                />
+              </div>
+            </>
+          )}
+
+          {/* Shared fields */}
           <div className="relative">
             <User className="absolute right-3 bottom-3 w-4 h-4 text-cyber-cyan/50" />
             <CyberInput
               label="Judge ID / Username"
-              placeholder="e.g. judge1"
+              placeholder="e.g. sarah_c"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               disabled={loading}
@@ -158,24 +236,23 @@ export default function JudgeLoginPage() {
           )}
 
           <div className="flex flex-col gap-3 mt-2">
-            <CyberButton
-              type="submit"
-              variant="cyan"
-              fullWidth
-              disabled={loading}
-            >
-              {loading ? "AUTHORIZING ACCESS..." : "ESTABLISH CONNECTION"}
+            <CyberButton type="submit" variant="cyan" fullWidth disabled={loading}>
+              {loading
+                ? "PROCESSING..."
+                : isLogin
+                ? "ESTABLISH CONNECTION"
+                : "INITIALIZE JURIST NODE"}
             </CyberButton>
-            
             <p className="text-[9px] text-center text-gray-500 font-mono">
-              SECURE SYNC TERMINAL PORT: 8443
+              {isLogin
+                ? "NEW JUDGE? SWITCH TO REGISTER TAB ABOVE"
+                : "ALREADY REGISTERED? SWITCH TO AUTHORIZE TAB ABOVE"}
             </p>
           </div>
         </form>
       </div>
 
-      {/* Aesthetic Footer */}
-      <footer className="mt-8 text-center text-[10px] text-gray-600 font-mono uppercase tracking-widest">
+      <footer className="mt-8 text-center text-[10px] text-gray-600 font-mono uppercase tracking-widest relative z-10">
         SYSTEM SHIELD AUDIT ACTIVE • BMSIT&M © 2026
       </footer>
     </div>
