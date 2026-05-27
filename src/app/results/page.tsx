@@ -10,7 +10,9 @@ import {
   RefreshCw, 
   Cpu, 
   Gamepad2, 
-  UserCheck
+  UserCheck,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
 import { getLeaderboard, getConfig, initDatabase, LeaderboardEntry } from "@/lib/db";
 import { useRealtimeSync } from "@/lib/useRealtimeSync";
@@ -22,6 +24,14 @@ export default function LeaderboardPage() {
   const [announced, setAnnounced] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [expandedTeams, setExpandedTeams] = useState<Record<string, boolean>>({});
+
+  const toggleTeam = (teamId: string) => {
+    setExpandedTeams(prev => ({
+      ...prev,
+      [teamId]: !prev[teamId]
+    }));
+  };
 
   useEffect(() => {
     initDatabase();
@@ -229,62 +239,95 @@ export default function LeaderboardPage() {
                     ? "shadow-[0_0_12px_rgba(217,70,239,0.1)] border-cyber-magenta/20" 
                     : "border-cyber-cyan/10";
 
+              const isExpanded = !!expandedTeams[entry.teamId];
+
               return (
                 <div 
                   key={entry.teamId}
-                  className={`cyber-glass border p-5 transition-all duration-300 flex flex-col sm:flex-row justify-between sm:items-center gap-4 relative overflow-hidden hover:-translate-y-0.5 ${cardGlow}`}
+                  className={`cyber-glass border transition-all duration-300 flex flex-col relative overflow-hidden ${cardGlow}`}
                 >
                   {/* Decorative neon tags */}
                   {isFirst && <span className="absolute top-0 right-0 w-8 h-8 bg-cyber-yellow/20 clip-cyber-sm border-b border-l border-cyber-yellow/40" />}
 
-                  {/* Left segment: Rank & Info */}
-                  <div className="flex items-center gap-4">
-                    {/* Rank Badge */}
-                    <div className={`w-12 h-12 flex items-center justify-center font-orbitron font-extrabold text-lg border clip-cyber ${rankColor}`}>
-                      #{entry.rank}
+                  <div 
+                    className="p-5 flex flex-col sm:flex-row justify-between sm:items-center gap-4 cursor-pointer hover:bg-white/5 transition-colors"
+                    onClick={() => toggleTeam(entry.teamId)}
+                  >
+                    {/* Left segment: Rank & Info */}
+                    <div className="flex items-center gap-4">
+                      {/* Rank Badge */}
+                      <div className={`w-12 h-12 flex items-center justify-center font-orbitron font-extrabold text-lg border clip-cyber ${rankColor}`}>
+                        #{entry.rank}
+                      </div>
+
+                      <div className="flex flex-col gap-0.5">
+                        <h3 className="font-orbitron font-bold text-base text-white tracking-wide uppercase">
+                          {entry.teamName}
+                        </h3>
+                        <div className="flex items-center gap-3 font-mono text-[10px] text-gray-500">
+                          <span className="flex items-center gap-1">
+                            <UserCheck className="w-3.5 h-3.5 text-cyber-cyan" /> EVALUATIONS: {entry.judgeSubmissions.length}
+                          </span>
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="flex flex-col gap-0.5">
-                      <h3 className="font-orbitron font-bold text-base text-white tracking-wide uppercase">
-                        {entry.teamName}
-                      </h3>
-                      <div className="flex items-center gap-3 font-mono text-[10px] text-gray-500">
-                        <span className="flex items-center gap-1">
-                          <UserCheck className="w-3.5 h-3.5 text-cyber-cyan" /> EVALUATIONS: {entry.judgeSubmissions.length}
+                    {/* Right segment: Scores & Visualizer */}
+                    <div className="flex items-center gap-6 shrink-0 justify-between sm:justify-end">
+                      {/* Visual Bar chart display */}
+                      <div className="hidden md:flex flex-col gap-1 w-32">
+                        <div className="flex justify-between font-mono text-[9px] text-gray-500 uppercase">
+                          <span>RATING SCALE</span>
+                          <span>{entry.averageScore}%</span>
+                        </div>
+                        <div className="w-full bg-gray-950 h-2 border border-white/5 relative overflow-hidden">
+                          <div 
+                            className={`h-full absolute left-0 top-0 transition-all duration-500 ${
+                              isFirst ? "bg-cyber-yellow" : isSecond ? "bg-cyber-cyan" : "bg-cyber-magenta"
+                            }`}
+                            style={{ width: `${entry.averageScore}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        <span className="font-mono text-[9px] text-gray-500 uppercase tracking-widest block">
+                          CUMULATIVE AVERAGE
+                        </span>
+                        <span className={`font-orbitron font-extrabold text-2xl tracking-widest flex items-center justify-end gap-2 ${
+                          isFirst ? "text-cyber-yellow text-glow-yellow" : isSecond ? "text-cyber-cyan text-glow-cyan" : "text-cyber-magenta text-glow-magenta"
+                        }`}>
+                          {entry.averageScore}
+                          {isExpanded ? <ChevronUp className="w-5 h-5 text-gray-500" /> : <ChevronDown className="w-5 h-5 text-gray-500" />}
                         </span>
                       </div>
                     </div>
                   </div>
 
-                  {/* Right segment: Scores & Visualizer */}
-                  <div className="flex items-center gap-6 shrink-0 justify-between sm:justify-end">
-                    {/* Visual Bar chart display */}
-                    <div className="hidden md:flex flex-col gap-1 w-32">
-                      <div className="flex justify-between font-mono text-[9px] text-gray-500 uppercase">
-                        <span>RATING SCALE</span>
-                        <span>{entry.averageScore}%</span>
-                      </div>
-                      <div className="w-full bg-gray-950 h-2 border border-white/5 relative overflow-hidden">
-                        <div 
-                          className={`h-full absolute left-0 top-0 transition-all duration-500 ${
-                            isFirst ? "bg-cyber-yellow" : isSecond ? "bg-cyber-cyan" : "bg-cyber-magenta"
-                          }`}
-                          style={{ width: `${entry.averageScore}%` }}
-                        />
-                      </div>
+                  {/* Expanded Content: Judge Breakdown */}
+                  {isExpanded && (
+                    <div className="px-5 pb-5 pt-2 border-t border-white/5 bg-black/20">
+                      <h4 className="font-mono text-[10px] text-gray-400 uppercase tracking-widest mb-3">
+                        INDIVIDUAL JUDGE EVALUATIONS
+                      </h4>
+                      {entry.judgeSubmissions.length === 0 ? (
+                        <p className="font-mono text-xs text-gray-500 italic">No evaluations submitted yet.</p>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                          {entry.judgeSubmissions.map((sub, idx) => (
+                            <div key={idx} className="bg-gray-900/50 border border-white/5 p-3 flex justify-between items-center">
+                              <span className="font-orbitron text-xs text-gray-300 uppercase truncate pr-2" title={sub.judgeName}>
+                                {sub.judgeName}
+                              </span>
+                              <span className="font-mono text-sm font-bold text-cyber-cyan">
+                                {sub.totalScore}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-
-                    <div className="text-right">
-                      <span className="font-mono text-[9px] text-gray-500 uppercase tracking-widest block">
-                        CUMULATIVE AVERAGE
-                      </span>
-                      <span className={`font-orbitron font-extrabold text-2xl tracking-widest ${
-                        isFirst ? "text-cyber-yellow text-glow-yellow" : isSecond ? "text-cyber-cyan text-glow-cyan" : "text-cyber-magenta text-glow-magenta"
-                      }`}>
-                        {entry.averageScore}
-                      </span>
-                    </div>
-                  </div>
+                  )}
                 </div>
               );
             })}
