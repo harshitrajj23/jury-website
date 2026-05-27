@@ -58,6 +58,17 @@ export async function removeTeam(id: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function toggleDisqualifyTeam(teamId: string, teamName: string, disqualify: boolean): Promise<void> {
+  let newName = teamName;
+  if (disqualify && !teamName.startsWith("[DISQUALIFIED]")) {
+    newName = `[DISQUALIFIED] ${teamName}`;
+  } else if (!disqualify && teamName.startsWith("[DISQUALIFIED]")) {
+    newName = teamName.replace("[DISQUALIFIED] ", "");
+  }
+  const { error } = await supabase.from("pals_teams").update({ name: newName }).eq("id", teamId);
+  if (error) throw error;
+}
+
 // CONFIG & CRITERIA
 export async function getConfig(): Promise<AppConfig> {
   const { data, error } = await supabase.from("pals_config").select("*").eq("id", "main").single();
@@ -136,9 +147,12 @@ export interface LeaderboardEntry {
 }
 
 export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
-  const teams = await getTeams();
+  const allTeams = await getTeams();
   const judges = await getJudges();
   const scores = await getScores();
+  
+  // Filter out disqualified teams
+  const teams = allTeams.filter(t => !t.name.startsWith("[DISQUALIFIED]"));
   
   const entries: Omit<LeaderboardEntry, "rank">[] = teams.map((team) => {
     const teamScores = scores.filter((s) => s.teamId === team.id);

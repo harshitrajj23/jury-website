@@ -147,25 +147,7 @@ export default function LeaderboardPage() {
           </div>
 
           <div className="flex gap-4 w-full mt-2 justify-center">
-            {hasJudgeSession ? (
-              <CyberButton
-                variant="cyan"
-                size="sm"
-                onClick={() => router.push("/dashboard")}
-                className="flex items-center gap-1.5"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" /> BACK TO DECK
-              </CyberButton>
-            ) : (
-              <CyberButton
-                variant="cyan"
-                size="sm"
-                onClick={() => router.push("/")}
-                className="flex items-center gap-1.5"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" /> JURY ACCESS
-              </CyberButton>
-            )}
+
 
             <CyberButton
               variant="magenta"
@@ -217,25 +199,7 @@ export default function LeaderboardPage() {
               <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} /> SYNC DATA
             </CyberButton>
 
-            {hasJudgeSession ? (
-              <CyberButton
-                variant="cyan"
-                size="sm"
-                onClick={() => router.push("/dashboard")}
-                className="flex items-center gap-1.5"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" /> BACK TO DECK
-              </CyberButton>
-            ) : (
-              <CyberButton
-                variant="cyan"
-                size="sm"
-                onClick={() => router.push("/")}
-                className="flex items-center gap-1.5"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" /> JURY LOGIN
-              </CyberButton>
-            )}
+
           </div>
         </div>
       </header>

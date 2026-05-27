@@ -166,12 +166,7 @@ export default function JudgeDashboardPage() {
     return Object.values(evaluationScores).reduce((sum, score) => sum + score, 0);
   };
 
-  const handleOpenSignOff = () => {
-    setShowSignOffModal(true);
-  };
-
-  const handleFinalSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleFinalSubmit = async () => {
     if (!selectedTeam || !judge) return;
     
     setActionLoading(true);
@@ -183,9 +178,9 @@ export default function JudgeDashboardPage() {
       totalScore: calculateTotal(),
       submittedAt: new Date().toISOString(),
       judgeSignOff: {
-        name: signOffName,
-        designation: signOffDesignation,
-        date: signOffDate
+        name: judge.name,
+        designation: judge.designation,
+        date: new Date().toISOString()
       }
     };
 
@@ -195,7 +190,6 @@ export default function JudgeDashboardPage() {
       // Re-fetch scores to update locked state
       const updatedScores = await getScores();
       setScores(updatedScores);
-      setShowSignOffModal(false);
     } catch (err) {
       alert("FAIL: TRANSMISSION TIMEOUT. PLEASE TRY AGAIN.");
     } finally {
@@ -420,15 +414,16 @@ export default function JudgeDashboardPage() {
               {!isCurrentTeamLocked && (
                 <div className="border-t border-cyber-cyan/15 pt-4 mt-2 flex justify-between items-center gap-4">
                   <p className="text-[10px] font-mono text-gray-500 uppercase leading-snug">
-                    ⚡ CHECKLIST PROTOCOLS MANDATE REVIEWING ALL METRICS BEFORE FINAL TRANSMISSION.
+                    ⚡ ALL METRICS ARE FINAL ON SUBMISSION.
                   </p>
                   <CyberButton
                     variant="cyan"
                     size="md"
-                    onClick={handleOpenSignOff}
+                    onClick={handleFinalSubmit}
+                    disabled={actionLoading}
                     className="flex items-center gap-1.5 shrink-0"
                   >
-                    <ShieldCheck className="w-4 h-4" /> LOCK & SUBMIT
+                    <ShieldCheck className="w-4 h-4" /> {actionLoading ? "SYNCING..." : "SUBMIT"}
                   </CyberButton>
                 </div>
               )}
@@ -446,101 +441,6 @@ export default function JudgeDashboardPage() {
 
 
       </main>
-
-      {/* High-Tech Sign-off Confirmation Modal */}
-      {showSignOffModal && selectedTeam && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-cyber-bg-darker/80 backdrop-blur-sm">
-          <div className="w-full max-w-lg cyber-glass-magenta border border-cyber-magenta/30 p-6 relative flex flex-col gap-5">
-            {/* Corner tags */}
-            <span className="absolute top-0 left-0 w-2.5 h-2.5 bg-cyber-magenta" />
-            <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-cyber-magenta" />
-
-            <div className="flex items-center gap-2 border-b border-cyber-magenta/25 pb-3">
-              <Lock className="w-5 h-5 text-cyber-magenta animate-pulse" />
-              <div>
-                <h3 className="font-orbitron font-extrabold text-sm text-cyber-magenta text-glow-magenta uppercase tracking-wider">
-                  🔐 SIGN-OFF TRANSACTION TERMINAL
-                </h3>
-                <p className="text-[9px] font-mono text-gray-500 uppercase">
-                  VERIFYING LOCK FOR {selectedTeam.name}
-                </p>
-              </div>
-            </div>
-
-            <div className="bg-cyber-magenta/5 border border-cyber-magenta/20 p-3 font-mono text-xs text-gray-300 flex flex-col gap-2">
-              <span className="text-cyber-magenta font-bold">⚡ SECURE RATINGS RECORDED:</span>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] border-t border-cyber-magenta/10 pt-2 mt-1">
-                {criteria.map((c) => (
-                  <div key={c.id} className="flex justify-between border-b border-gray-900 pb-1">
-                    <span className="truncate pr-1 text-gray-500">{c.name}:</span>
-                    <span className="text-cyber-cyan font-bold font-mono">{evaluationScores[c.id] || 5}/10</span>
-                  </div>
-                ))}
-              </div>
-              <div className="flex justify-between items-center text-xs font-bold text-white border-t border-cyber-magenta/25 pt-2.5 mt-1.5">
-                <span>CUMULATIVE METRIC SUM:</span>
-                <span className="text-cyber-magenta text-glow-magenta font-orbitron font-extrabold text-sm">{calculateTotal()}/{criteria.length * 10}</span>
-              </div>
-            </div>
-
-            {/* Compliance Form inputs */}
-            <form onSubmit={handleFinalSubmit} className="flex flex-col gap-4">
-              <CyberInput
-                variant="magenta"
-                label="VERIFY FULL JURIST NAME"
-                value={signOffName}
-                onChange={(e) => setSignOffName(e.target.value)}
-                disabled={actionLoading}
-                required
-              />
-
-              <CyberInput
-                variant="magenta"
-                label="VERIFY INSTITUTION / DESIGNATION"
-                value={signOffDesignation}
-                onChange={(e) => setSignOffDesignation(e.target.value)}
-                disabled={actionLoading}
-                required
-              />
-
-              <CyberInput
-                variant="magenta"
-                label="EVALUATION DATE KEY"
-                type="date"
-                value={signOffDate}
-                onChange={(e) => setSignOffDate(e.target.value)}
-                disabled={actionLoading}
-                required
-              />
-
-              <div className="bg-cyber-red/5 border border-cyber-red/25 p-3 font-mono text-[10px] text-gray-400">
-                ⚠️ WARNING: ONCE SIGN-OFF TRANSACTION COMPLETES, ALL VALUES ARE PARSED AND LOCKED AS READ-ONLY IN DATABASE. FURTHER RETRACTS OR EDITS ARE LOCKED.
-              </div>
-
-              <div className="flex gap-3 justify-end mt-2">
-                <CyberButton
-                  type="button"
-                  variant="yellow"
-                  size="sm"
-                  onClick={() => setShowSignOffModal(false)}
-                  disabled={actionLoading}
-                >
-                  ABORT TRANSACTION
-                </CyberButton>
-
-                <CyberButton
-                  type="submit"
-                  variant="magenta"
-                  size="sm"
-                  disabled={actionLoading}
-                >
-                  {actionLoading ? "SYNCING..." : "COMMIT TRANSMISSION"}
-                </CyberButton>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

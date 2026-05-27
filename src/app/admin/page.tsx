@@ -35,6 +35,7 @@ import {
   initDatabase,
   getLeaderboard,
   updateTimerDuration,
+  toggleDisqualifyTeam,
   LeaderboardEntry
 } from "@/lib/db";
 import { Judge, Team, ScoringCriteria, ScoreRecord, AppConfig } from "@/lib/types";
@@ -223,6 +224,19 @@ export default function AdminPage() {
       await fetchDbData();
     } catch {
       alert("FAIL: TEAM ELIMINATION FAILED.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDisqualifyTeam = async (id: string, name: string, isDisqualified: boolean) => {
+    if (!confirm(isDisqualified ? "REINSTATE this team back to the active leaderboard?" : "DISQUALIFY this team? They will be removed from the leaderboard.")) return;
+    setActionLoading(true);
+    try {
+      await toggleDisqualifyTeam(id, name, !isDisqualified);
+      await fetchDbData();
+    } catch {
+      alert("FAIL: TEAM DISQUALIFICATION STATE TOGGLE FAILED.");
     } finally {
       setActionLoading(false);
     }
@@ -722,22 +736,32 @@ export default function AdminPage() {
                   ) : (
                     teams.map((t) => {
                       const complCount = scores.filter((s) => s.teamId === t.id).length;
+                      const isDq = t.name.startsWith("[DISQUALIFIED]");
                       
                       return (
                         <div key={t.id} className="bg-cyber-bg-darker/60 border border-gray-800 p-3 flex justify-between items-center hover:border-cyber-magenta/20 transition-all duration-300">
                           <div className="flex flex-col gap-0.5">
-                            <span className="font-orbitron font-bold text-xs text-white uppercase">{t.name}</span>
+                            <span className={`font-orbitron font-bold text-xs uppercase ${isDq ? "text-cyber-red line-through" : "text-white"}`}>{t.name}</span>
                             <span className="text-[9px] text-gray-500 font-mono uppercase">
                               COMPLETED EVALS: {complCount}/{judges.length}
                             </span>
                           </div>
-                          <button
-                            onClick={() => handleRemoveTeam(t.id)}
-                            className="p-2 text-gray-500 hover:text-cyber-red hover:bg-cyber-red/10 border border-transparent hover:border-cyber-red/20 transition-all duration-300 cursor-pointer"
-                            title="Eliminate Team from system"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleDisqualifyTeam(t.id, t.name, isDq)}
+                              className={`p-2 border border-transparent transition-all duration-300 cursor-pointer ${isDq ? "text-cyber-green hover:bg-cyber-green/10 hover:border-cyber-green/20" : "text-cyber-yellow hover:bg-cyber-yellow/10 hover:border-cyber-yellow/20"}`}
+                              title={isDq ? "Reinstate Team" : "Disqualify Team"}
+                            >
+                              <AlertOctagon className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleRemoveTeam(t.id)}
+                              className="p-2 text-gray-500 hover:text-cyber-red hover:bg-cyber-red/10 border border-transparent hover:border-cyber-red/20 transition-all duration-300 cursor-pointer"
+                              title="Eliminate Team from system"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
                       );
                     })

@@ -35,4 +35,5 @@ export interface AppConfig {
   announceResults: boolean;
   criteriaList: ScoringCriteria[];
   timerDuration: number; // in seconds
+  disqualifiedTeams?: string[];
 }
