@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { 
   ShieldCheck, 
   Users, 
@@ -42,6 +43,8 @@ import CyberButton from "@/components/CyberButton";
 import CyberInput from "@/components/CyberInput";
 
 export default function AdminPage() {
+  const router = useRouter();
+
   // Authentication State
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminUser, setAdminUser] = useState("");
@@ -440,6 +443,15 @@ export default function AdminPage() {
               className="flex items-center gap-1.5"
             >
               {announceResults ? "🔐 LOCK RESULTS" : "📢 PUBLISH RESULTS"}
+            </CyberButton>
+
+            <CyberButton
+              variant="magenta"
+              size="sm"
+              onClick={() => router.push("/results")}
+              className="flex items-center gap-1.5"
+            >
+              🏆 LEADERBOARD
             </CyberButton>
 
             <CyberButton

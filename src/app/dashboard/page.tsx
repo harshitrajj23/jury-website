@@ -242,16 +242,7 @@ export default function JudgeDashboardPage() {
           </div>
 
           <div className="flex items-center gap-3 flex-wrap">
-            {announceResults && (
-              <CyberButton 
-                variant="magenta" 
-                size="sm"
-                onClick={() => router.push("/results")}
-                className="flex items-center gap-1.5"
-              >
-                📊 LEADERBOARD
-              </CyberButton>
-            )}
+
 
             <CyberButton
               variant="red"
