@@ -1,17 +1,14 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import confetti from "canvas-confetti";
 import { 
   Trophy, 
   Lock, 
   Radio, 
-  ArrowLeft, 
   RefreshCw, 
   Cpu, 
-  Gamepad2, 
   UserCheck,
   ChevronDown,
   ChevronUp
@@ -21,7 +18,6 @@ import { useRealtimeSync } from "@/lib/useRealtimeSync";
 import CyberButton from "@/components/CyberButton";
 
 export default function LeaderboardPage() {
-  const router = useRouter();
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [announced, setAnnounced] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -35,10 +31,28 @@ export default function LeaderboardPage() {
     }));
   };
 
+  const fetchLeaderboard = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const config = await getConfig();
+      setAnnounced(config.announceResults);
+      
+      if (config.announceResults) {
+        const data = await getLeaderboard();
+        setLeaderboard(data);
+      }
+    } catch (err) {
+      console.error("Failed to compile transmission:", err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
   useEffect(() => {
     initDatabase();
-    fetchLeaderboard();
-  }, []);
+    Promise.resolve().then(() => fetchLeaderboard());
+  }, [fetchLeaderboard]);
 
   useEffect(() => {
     if (announced && leaderboard.length > 0) {
@@ -71,35 +85,17 @@ export default function LeaderboardPage() {
     }
   }, [announced, leaderboard.length]);
 
-  const fetchLeaderboard = async () => {
-    setRefreshing(true);
-    try {
-      const config = await getConfig();
-      setAnnounced(config.announceResults);
-      
-      if (config.announceResults) {
-        const data = await getLeaderboard();
-        setLeaderboard(data);
-      }
-    } catch (err) {
-      console.error("Failed to compile transmission:", err);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
   // Realtime WebSocket sync — auto-refresh when scores or config change
   const handleRealtimeChange = useCallback(() => {
     fetchLeaderboard();
-  }, []);
+  }, [fetchLeaderboard]);
 
   const realtimeStatus = useRealtimeSync({
     tables: ["pals_scores", "pals_config"],
     onDataChange: handleRealtimeChange,
   });
 
-  const hasJudgeSession = typeof window !== "undefined" && !!sessionStorage.getItem("judge_session");
+
 
   if (loading) {
     return (

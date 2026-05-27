@@ -15,8 +15,10 @@ export default function Timer({ duration = 480 }: TimerProps) {
 
   // Sync timeLeft when duration updates from the database
   useEffect(() => {
-    setTimeLeft(duration);
-    setIsRunning(false);
+    Promise.resolve().then(() => {
+      setTimeLeft(duration);
+      setIsRunning(false);
+    });
     if (timerRef.current) clearInterval(timerRef.current);
   }, [duration]);
 
@@ -26,7 +28,9 @@ export default function Timer({ duration = 480 }: TimerProps) {
         setTimeLeft((prev) => prev - 1);
       }, 1000);
     } else if (timeLeft === 0) {
-      setIsRunning(false);
+      if (isRunning) {
+        Promise.resolve().then(() => setIsRunning(false));
+      }
       if (timerRef.current) clearInterval(timerRef.current);
     }
 

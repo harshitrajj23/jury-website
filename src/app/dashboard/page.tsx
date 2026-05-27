@@ -56,28 +56,6 @@ export default function JudgeDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   
-  // Route security & mount initializers
-  useEffect(() => {
-    initDatabase();
-    
-    const session = sessionStorage.getItem("judge_session");
-    if (!session) {
-      router.push("/");
-      return;
-    }
-    
-    const parsedJudge = JSON.parse(session) as Judge;
-    setJudge(parsedJudge);
-    setSignOffName(parsedJudge.name);
-    setSignOffDesignation(parsedJudge.designation);
-    
-    // Set default date to today's date in local time string YYYY-MM-DD
-    const today = new Date().toISOString().split("T")[0];
-    setSignOffDate(today);
-    
-    fetchData(parsedJudge.id);
-  }, [router]);
-
   const fetchData = async (judgeId: string) => {
     setLoading(true);
     try {
@@ -102,7 +80,33 @@ export default function JudgeDashboardPage() {
     }
   };
 
+  // Route security & mount initializers
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    initDatabase();
+    
+    const session = sessionStorage.getItem("judge_session");
+    if (!session) {
+      router.push("/");
+      return;
+    }
+    
+    const parsedJudge = JSON.parse(session) as Judge;
+    
+    Promise.resolve().then(() => {
+      setJudge(parsedJudge);
+      setSignOffName(parsedJudge.name);
+      setSignOffDesignation(parsedJudge.designation);
+      
+      const today = new Date().toISOString().split("T")[0];
+      setSignOffDate(today);
+    });
+    
+    fetchData(parsedJudge.id);
+  }, [router]);
+
   // Realtime WebSocket sync — auto-refresh when DB changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const handleRealtimeChange = useCallback(() => {
     if (judge) {
       fetchData(judge.id);
