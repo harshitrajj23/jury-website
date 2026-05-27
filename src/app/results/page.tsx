@@ -66,8 +66,8 @@ export default function LeaderboardPage() {
         }
       };
       
-      // Delay the confetti until the 1st place team is revealed (1.8s + 0.5s)
-      setTimeout(frame, 2300);
+      // Delay the confetti until the 1st place team is revealed (3.5s)
+      setTimeout(frame, 3500);
     }
   }, [announced, leaderboard.length]);
 
@@ -250,135 +250,202 @@ export default function LeaderboardPage() {
             </p>
           </div>
         ) : (
-          <div className="flex flex-col gap-4">
-            {leaderboard.map((entry, idx) => {
-              const isFirst = entry.rank === 1;
-              const isSecond = entry.rank === 2;
-              const isThird = entry.rank === 3;
-              
-              const rankColor = isFirst 
-                ? "border-cyber-yellow/40 text-cyber-yellow bg-cyber-yellow/10" 
-                : isSecond 
-                  ? "border-cyber-cyan/40 text-cyber-cyan bg-cyber-cyan/10" 
-                  : isThird 
-                    ? "border-cyber-magenta/40 text-cyber-magenta bg-cyber-magenta/10"
-                    : "border-gray-800 text-gray-400 bg-gray-900/30";
-
-              const cardGlow = isFirst 
-                ? "shadow-[0_0_15px_rgba(234,179,8,0.1)] border-cyber-yellow/30" 
-                : isSecond 
-                  ? "shadow-[0_0_12px_rgba(6,182,212,0.1)] border-cyber-cyan/20" 
-                  : isThird 
-                    ? "shadow-[0_0_12px_rgba(217,70,239,0.1)] border-cyber-magenta/20" 
-                    : "border-cyber-cyan/10";
-
-              const isExpanded = !!expandedTeams[entry.teamId];
-
-              let revealDelay = 0;
-              if (idx === 0) revealDelay = 1.8; // 1st Place - Highest Hype
-              else if (idx === 1) revealDelay = 1.0; // 2nd Place
-              else if (idx === 2) revealDelay = 0.2; // 3rd Place
-              else revealDelay = 2.4 + (idx - 3) * 0.1; // Rest of the teams
-
-              return (
-                <motion.div 
-                  key={entry.teamId}
-                  initial={{ opacity: 0, y: 50, scale: 0.9 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  transition={{ 
-                    duration: 0.7, 
-                    delay: revealDelay, 
-                    type: "spring", 
-                    bounce: 0.5 
-                  }}
-                  className={`cyber-glass border transition-all duration-300 flex flex-col relative overflow-hidden ${cardGlow} ${isFirst ? 'scale-[1.02] md:scale-105 z-30 shadow-[0_0_30px_rgba(234,179,8,0.2)]' : isSecond ? 'z-20' : 'z-10'}`}
-                >
-                  {/* Decorative neon tags */}
-                  {isFirst && <span className="absolute top-0 right-0 w-8 h-8 bg-cyber-yellow/40 clip-cyber-sm border-b border-l border-cyber-yellow/60 shadow-[0_0_15px_#eab308]" />}
-                  {isFirst && <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 2.5, duration: 1 }} className="absolute inset-0 bg-cyber-yellow/5 pointer-events-none animate-pulse" />}
-
-                  <div 
-                    className="p-5 flex flex-col sm:flex-row justify-between sm:items-center gap-4 cursor-pointer hover:bg-white/5 transition-colors"
-                    onClick={() => toggleTeam(entry.teamId)}
+          <div className="flex flex-col w-full">
+            {/* ========================================================= */}
+            {/* THE HYPE PODIUM (TOP 3)                                   */}
+            {/* ========================================================= */}
+            {leaderboard.length > 0 && (
+              <div className="flex flex-col md:flex-row justify-center items-end gap-6 mb-16 mt-12 px-2 md:px-12 min-h-[300px]">
+                
+                {/* 2ND PLACE (Left side, drops in at 1.5s) */}
+                {leaderboard[1] && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 150 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.8, delay: 1.5, type: "spring", bounce: 0.4 }}
+                    className="w-full md:w-1/3 flex flex-col items-center order-2 md:order-1"
                   >
-                    {/* Left segment: Rank & Info */}
-                    <div className="flex items-center gap-4">
-                      {/* Rank Badge */}
-                      <div className={`w-12 h-12 flex items-center justify-center font-orbitron font-extrabold text-lg border clip-cyber ${rankColor}`}>
-                        #{entry.rank}
-                      </div>
-
-                      <div className="flex flex-col gap-0.5">
-                        <h3 className="font-orbitron font-bold text-base text-white tracking-wide uppercase">
-                          {entry.teamName}
-                        </h3>
-                        <div className="flex items-center gap-3 font-mono text-[10px] text-gray-500">
-                          <span className="flex items-center gap-1">
-                            <UserCheck className="w-3.5 h-3.5 text-cyber-cyan" /> EVALUATIONS: {entry.judgeSubmissions.length}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Right segment: Scores & Visualizer */}
-                    <div className="flex items-center gap-6 shrink-0 justify-between sm:justify-end">
-                      {/* Visual Bar chart display */}
-                      <div className="hidden md:flex flex-col gap-1 w-32">
-                        <div className="flex justify-between font-mono text-[9px] text-gray-500 uppercase">
-                          <span>RATING SCALE</span>
-                          <span>{entry.averageScore}%</span>
-                        </div>
-                        <div className="w-full bg-gray-950 h-2 border border-white/5 relative overflow-hidden">
-                          <div 
-                            className={`h-full absolute left-0 top-0 transition-all duration-500 ${
-                              isFirst ? "bg-cyber-yellow" : isSecond ? "bg-cyber-cyan" : "bg-cyber-magenta"
-                            }`}
-                            style={{ width: `${entry.averageScore}%` }}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="text-right">
-                        <span className="font-mono text-[9px] text-gray-500 uppercase tracking-widest block">
-                          CUMULATIVE AVERAGE
-                        </span>
-                        <span className={`font-orbitron font-extrabold text-2xl tracking-widest flex items-center justify-end gap-2 ${
-                          isFirst ? "text-cyber-yellow text-glow-yellow" : isSecond ? "text-cyber-cyan text-glow-cyan" : "text-cyber-magenta text-glow-magenta"
-                        }`}>
-                          {entry.averageScore}
-                          {isExpanded ? <ChevronUp className="w-5 h-5 text-gray-500" /> : <ChevronDown className="w-5 h-5 text-gray-500" />}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Expanded Content: Judge Breakdown */}
-                  {isExpanded && (
-                    <div className="px-5 pb-5 pt-2 border-t border-white/5 bg-black/20">
-                      <h4 className="font-mono text-[10px] text-gray-400 uppercase tracking-widest mb-3">
-                        INDIVIDUAL JUDGE EVALUATIONS
-                      </h4>
-                      {entry.judgeSubmissions.length === 0 ? (
-                        <p className="font-mono text-xs text-gray-500 italic">No evaluations submitted yet.</p>
-                      ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                          {entry.judgeSubmissions.map((sub, idx) => (
-                            <div key={idx} className="bg-gray-900/50 border border-white/5 p-3 flex justify-between items-center">
-                              <span className="font-orbitron text-xs text-gray-300 uppercase truncate pr-2" title={sub.judgeName}>
-                                {sub.judgeName}
-                              </span>
-                              <span className="font-mono text-sm font-bold text-cyber-cyan">
-                                {sub.totalScore}
-                              </span>
+                    <div className="cyber-glass border border-cyber-cyan/40 bg-cyber-cyan/10 w-full p-6 text-center shadow-[0_0_30px_rgba(6,182,212,0.15)] flex flex-col items-center relative overflow-hidden rounded-t-xl md:h-[220px] justify-end hover:-translate-y-2 transition-transform cursor-pointer" onClick={() => toggleTeam(leaderboard[1].teamId)}>
+                      <div className="absolute top-0 left-0 w-full h-1.5 bg-cyber-cyan shadow-[0_0_10px_#06b6d4]" />
+                      <div className="w-14 h-14 rounded-full bg-cyber-cyan/20 border-2 border-cyber-cyan text-cyber-cyan flex items-center justify-center font-orbitron font-extrabold text-2xl mb-4 shadow-[0_0_20px_#06b6d4]">2</div>
+                      <h3 className="font-orbitron font-bold text-lg text-white uppercase w-full break-words leading-tight text-glow-cyan">{leaderboard[1].teamName}</h3>
+                      <p className="font-mono text-sm text-cyber-cyan mt-3 font-bold bg-black/50 px-3 py-1 rounded-full">{leaderboard[1].averageScore} PTS</p>
+                      
+                      {/* Expanded scores for 2nd place */}
+                      {!!expandedTeams[leaderboard[1].teamId] && (
+                        <div className="w-full mt-4 border-t border-cyber-cyan/20 pt-3 text-left">
+                          {leaderboard[1].judgeSubmissions.map((sub, i) => (
+                            <div key={i} className="flex justify-between text-[10px] font-mono border-b border-white/5 py-1">
+                              <span className="text-gray-400 truncate pr-2">{sub.judgeName}</span>
+                              <span className="text-cyber-cyan font-bold">{sub.totalScore}</span>
                             </div>
                           ))}
                         </div>
                       )}
                     </div>
-                  )}
+                  </motion.div>
+                )}
+
+                {/* 1ST PLACE (Center, drops in at 3.0s) */}
+                {leaderboard[0] && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 200, scale: 0.8 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={{ duration: 1, delay: 3.0, type: "spring", bounce: 0.5 }}
+                    className="w-full md:w-1/3 flex flex-col items-center order-1 md:order-2 z-20"
+                  >
+                    <motion.div 
+                      initial={{ opacity: 0, scale: 0 }} 
+                      animate={{ opacity: 1, scale: 1 }} 
+                      transition={{ delay: 3.8, duration: 0.5, type: "spring", bounce: 0.6 }}
+                      className="text-center mb-4 text-cyber-yellow animate-bounce font-orbitron font-extrabold uppercase tracking-widest text-sm shadow-black drop-shadow-md"
+                    >
+                      👑 GRAND CHAMPION 👑
+                    </motion.div>
+                    
+                    <div className="cyber-glass border-2 border-cyber-yellow/60 bg-cyber-yellow/15 w-full p-8 text-center shadow-[0_0_50px_rgba(234,179,8,0.3)] flex flex-col items-center relative overflow-hidden rounded-t-xl md:h-[280px] justify-end transform md:scale-110 hover:-translate-y-2 transition-transform cursor-pointer" onClick={() => toggleTeam(leaderboard[0].teamId)}>
+                      <div className="absolute top-0 left-0 w-full h-2 bg-cyber-yellow shadow-[0_0_20px_#eab308]" />
+                      <div className="absolute inset-0 bg-cyber-yellow/10 pointer-events-none animate-pulse" />
+                      
+                      <div className="w-20 h-20 rounded-full bg-cyber-yellow/20 border-2 border-cyber-yellow text-cyber-yellow flex items-center justify-center font-orbitron font-extrabold text-4xl mb-4 shadow-[0_0_30px_#eab308] relative z-10">1</div>
+                      <h3 className="font-orbitron font-black text-2xl text-white uppercase w-full break-words leading-tight text-glow-yellow relative z-10">{leaderboard[0].teamName}</h3>
+                      <p className="font-mono text-base text-cyber-yellow mt-3 font-extrabold bg-black/60 px-4 py-1.5 rounded-full relative z-10">{leaderboard[0].averageScore} PTS</p>
+
+                      {/* Expanded scores for 1st place */}
+                      {!!expandedTeams[leaderboard[0].teamId] && (
+                        <div className="w-full mt-4 border-t border-cyber-yellow/30 pt-3 text-left relative z-10">
+                          {leaderboard[0].judgeSubmissions.map((sub, i) => (
+                            <div key={i} className="flex justify-between text-[11px] font-mono border-b border-white/5 py-1">
+                              <span className="text-gray-300 truncate pr-2">{sub.judgeName}</span>
+                              <span className="text-cyber-yellow font-bold">{sub.totalScore}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* 3RD PLACE (Right side, drops in first at 0.2s) */}
+                {leaderboard[2] && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 100 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.8, delay: 0.2, type: "spring", bounce: 0.4 }}
+                    className="w-full md:w-1/3 flex flex-col items-center order-3 md:order-3"
+                  >
+                    <div className="cyber-glass border border-cyber-magenta/40 bg-cyber-magenta/10 w-full p-6 text-center shadow-[0_0_30px_rgba(217,70,239,0.15)] flex flex-col items-center relative overflow-hidden rounded-t-xl md:h-[180px] justify-end hover:-translate-y-2 transition-transform cursor-pointer" onClick={() => toggleTeam(leaderboard[2].teamId)}>
+                      <div className="absolute top-0 left-0 w-full h-1.5 bg-cyber-magenta shadow-[0_0_10px_#d946ef]" />
+                      <div className="w-12 h-12 rounded-full bg-cyber-magenta/20 border-2 border-cyber-magenta text-cyber-magenta flex items-center justify-center font-orbitron font-extrabold text-xl mb-4 shadow-[0_0_20px_#d946ef]">3</div>
+                      <h3 className="font-orbitron font-bold text-base text-white uppercase w-full break-words leading-tight text-glow-magenta">{leaderboard[2].teamName}</h3>
+                      <p className="font-mono text-sm text-cyber-magenta mt-3 font-bold bg-black/50 px-3 py-1 rounded-full">{leaderboard[2].averageScore} PTS</p>
+
+                      {/* Expanded scores for 3rd place */}
+                      {!!expandedTeams[leaderboard[2].teamId] && (
+                        <div className="w-full mt-4 border-t border-cyber-magenta/20 pt-3 text-left">
+                          {leaderboard[2].judgeSubmissions.map((sub, i) => (
+                            <div key={i} className="flex justify-between text-[10px] font-mono border-b border-white/5 py-1">
+                              <span className="text-gray-400 truncate pr-2">{sub.judgeName}</span>
+                              <span className="text-cyber-magenta font-bold">{sub.totalScore}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+            )}
+
+            {/* ========================================================= */}
+            {/* THE REST OF THE LEADERBOARD (HONORABLE MENTIONS)          */}
+            {/* ========================================================= */}
+            {leaderboard.length > 3 && (
+              <div className="flex flex-col gap-4 mt-8">
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 5.0, duration: 1 }}
+                  className="flex items-center gap-4 w-full mb-6"
+                >
+                  <div className="h-px bg-gray-800 flex-grow" />
+                  <span className="font-orbitron text-xs font-bold text-gray-500 uppercase tracking-widest px-4">
+                    HONORABLE MENTIONS
+                  </span>
+                  <div className="h-px bg-gray-800 flex-grow" />
                 </motion.div>
-              );
-            })}
+
+                {leaderboard.slice(3).map((entry, idx) => {
+                  const actualRank = idx + 4;
+                  const isExpanded = !!expandedTeams[entry.teamId];
+                  const revealDelay = 5.5 + (idx * 0.15); // Reveal after podium sequence completes
+                  
+                  return (
+                    <motion.div 
+                      key={entry.teamId}
+                      initial={{ opacity: 0, x: -30 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ duration: 0.6, delay: revealDelay }}
+                      className="cyber-glass border border-gray-800 bg-gray-900/30 transition-all duration-300 flex flex-col relative overflow-hidden"
+                    >
+                      <div 
+                        className="p-5 flex flex-col sm:flex-row justify-between sm:items-center gap-4 cursor-pointer hover:bg-white/5 transition-colors"
+                        onClick={() => toggleTeam(entry.teamId)}
+                      >
+                        {/* Left segment: Rank & Info */}
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 flex items-center justify-center font-orbitron font-extrabold text-lg border clip-cyber border-gray-700 text-gray-400 bg-gray-800/30">
+                            #{actualRank}
+                          </div>
+
+                          <div className="flex flex-col gap-0.5">
+                            <h3 className="font-orbitron font-bold text-base text-gray-200 tracking-wide uppercase">
+                              {entry.teamName}
+                            </h3>
+                            <div className="flex items-center gap-3 font-mono text-[10px] text-gray-500">
+                              <span className="flex items-center gap-1">
+                                <UserCheck className="w-3.5 h-3.5 text-gray-600" /> EVALUATIONS: {entry.judgeSubmissions.length}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right segment: Scores & Visualizer */}
+                        <div className="flex items-center gap-6 shrink-0 justify-between sm:justify-end">
+                          <div className="text-right">
+                            <span className="font-mono text-[9px] text-gray-500 uppercase tracking-widest block">
+                              AVERAGE
+                            </span>
+                            <span className="font-orbitron font-extrabold text-2xl tracking-widest flex items-center justify-end gap-2 text-gray-300">
+                              {entry.averageScore}
+                              {isExpanded ? <ChevronUp className="w-5 h-5 text-gray-600" /> : <ChevronDown className="w-5 h-5 text-gray-600" />}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Expanded Content: Judge Breakdown */}
+                      {isExpanded && (
+                        <div className="px-5 pb-5 pt-2 border-t border-gray-800 bg-black/40">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mt-2">
+                            {entry.judgeSubmissions.map((sub, i) => (
+                              <div key={i} className="bg-gray-900/50 border border-gray-800 p-2 flex justify-between items-center">
+                                <span className="font-orbitron text-[10px] text-gray-400 uppercase truncate pr-2">
+                                  {sub.judgeName}
+                                </span>
+                                <span className="font-mono text-xs font-bold text-gray-300">
+                                  {sub.totalScore}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </main>
