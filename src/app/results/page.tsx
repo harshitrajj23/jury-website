@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
+import confetti from "canvas-confetti";
 import { 
   Trophy, 
   Lock, 
@@ -37,6 +39,37 @@ export default function LeaderboardPage() {
     initDatabase();
     fetchLeaderboard();
   }, []);
+
+  useEffect(() => {
+    if (announced && leaderboard.length > 0) {
+      const duration = 4 * 1000;
+      const end = Date.now() + duration;
+
+      const frame = () => {
+        confetti({
+          particleCount: 5,
+          angle: 60,
+          spread: 55,
+          origin: { x: 0 },
+          colors: ["#eab308", "#06b6d4", "#d946ef", "#ffffff"]
+        });
+        confetti({
+          particleCount: 5,
+          angle: 120,
+          spread: 55,
+          origin: { x: 1 },
+          colors: ["#eab308", "#06b6d4", "#d946ef", "#ffffff"]
+        });
+
+        if (Date.now() < end) {
+          requestAnimationFrame(frame);
+        }
+      };
+      
+      // Delay the confetti until the 1st place team is revealed (1.8s + 0.5s)
+      setTimeout(frame, 2300);
+    }
+  }, [announced, leaderboard.length]);
 
   const fetchLeaderboard = async () => {
     setRefreshing(true);
@@ -241,13 +274,28 @@ export default function LeaderboardPage() {
 
               const isExpanded = !!expandedTeams[entry.teamId];
 
+              let revealDelay = 0;
+              if (idx === 0) revealDelay = 1.8; // 1st Place - Highest Hype
+              else if (idx === 1) revealDelay = 1.0; // 2nd Place
+              else if (idx === 2) revealDelay = 0.2; // 3rd Place
+              else revealDelay = 2.4 + (idx - 3) * 0.1; // Rest of the teams
+
               return (
-                <div 
+                <motion.div 
                   key={entry.teamId}
-                  className={`cyber-glass border transition-all duration-300 flex flex-col relative overflow-hidden ${cardGlow}`}
+                  initial={{ opacity: 0, y: 50, scale: 0.9 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ 
+                    duration: 0.7, 
+                    delay: revealDelay, 
+                    type: "spring", 
+                    bounce: 0.5 
+                  }}
+                  className={`cyber-glass border transition-all duration-300 flex flex-col relative overflow-hidden ${cardGlow} ${isFirst ? 'scale-[1.02] md:scale-105 z-30 shadow-[0_0_30px_rgba(234,179,8,0.2)]' : isSecond ? 'z-20' : 'z-10'}`}
                 >
                   {/* Decorative neon tags */}
-                  {isFirst && <span className="absolute top-0 right-0 w-8 h-8 bg-cyber-yellow/20 clip-cyber-sm border-b border-l border-cyber-yellow/40" />}
+                  {isFirst && <span className="absolute top-0 right-0 w-8 h-8 bg-cyber-yellow/40 clip-cyber-sm border-b border-l border-cyber-yellow/60 shadow-[0_0_15px_#eab308]" />}
+                  {isFirst && <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 2.5, duration: 1 }} className="absolute inset-0 bg-cyber-yellow/5 pointer-events-none animate-pulse" />}
 
                   <div 
                     className="p-5 flex flex-col sm:flex-row justify-between sm:items-center gap-4 cursor-pointer hover:bg-white/5 transition-colors"
@@ -328,7 +376,7 @@ export default function LeaderboardPage() {
                       )}
                     </div>
                   )}
-                </div>
+                </motion.div>
               );
             })}
           </div>
