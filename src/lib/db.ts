@@ -3,6 +3,8 @@
 import bcrypt from "bcryptjs";
 import type { Judge, Team, ScoringCriteria, ScoreRecord, AppConfig, LeaderboardEntry, AuditLogEntry } from "./types";
 import { getDb } from "./neonClient";
+import { broadcastRealtimeEvent } from "./redisClient";
+
 
 export interface ActionResult<T = void> {
   success: boolean;
@@ -183,6 +185,7 @@ export async function addJudge(judge: Omit<Judge, "id">): Promise<ActionResult<J
     `;
 
     await logAudit("REGISTER_JUDGE", `Added judge ${judge.name} (${email})`, id);
+    await broadcastRealtimeEvent({ table: "User", action: "ADD_JUDGE", data: { id, name: judge.name, email } });
 
     const newJudge: Judge = {
       id,
@@ -208,6 +211,7 @@ export async function removeJudge(id: string): Promise<ActionResult> {
     await sql`DELETE FROM "Score" WHERE "judgeId" = ${id};`;
     await sql`DELETE FROM "User" WHERE id = ${id};`;
     await logAudit("REMOVE_JUDGE", `Removed judge ${id}`);
+    await broadcastRealtimeEvent({ table: "User", action: "REMOVE_JUDGE", data: { id } });
     return { success: true };
   } catch (err: any) {
     console.error("Neon DB Error (removeJudge):", err);
@@ -254,6 +258,7 @@ export async function addTeam(name: string): Promise<ActionResult<Team>> {
     `;
 
     await logAudit("ADD_TEAM", `Registered team ${trimmed} (${teamCode})`);
+    await broadcastRealtimeEvent({ table: "Team", action: "ADD_TEAM", data: { id, name: trimmed } });
 
     return {
       success: true,
@@ -279,6 +284,7 @@ export async function removeTeam(id: string): Promise<ActionResult> {
     await sql`DELETE FROM "Score" WHERE "teamId" = ${id};`;
     await sql`DELETE FROM "Team" WHERE id = ${id};`;
     await logAudit("REMOVE_TEAM", `Removed team ${id}`);
+    await broadcastRealtimeEvent({ table: "Team", action: "REMOVE_TEAM", data: { id } });
     return { success: true };
   } catch (err: any) {
     console.error("Neon DB Error (removeTeam):", err);
@@ -298,6 +304,7 @@ export async function toggleDisqualifyTeam(teamId: string, teamName: string, dis
     }
     await sql`UPDATE "Team" SET "teamName" = ${newName}, "updatedAt" = NOW() WHERE id = ${teamId};`;
     await logAudit(disqualify ? "DISQUALIFY_TEAM" : "REINSTATE_TEAM", `${teamName} -> ${newName}`);
+    await broadcastRealtimeEvent({ table: "Team", action: "TOGGLE_DISQUALIFY", data: { id: teamId, name: newName } });
     return { success: true };
   } catch (err: any) {
     console.error("Neon DB Error (toggleDisqualifyTeam):", err);
@@ -360,6 +367,7 @@ export async function updateConfig(config: AppConfig): Promise<ActionResult> {
           "updatedAt" = NOW()
       WHERE id = 'global';
     `;
+    await broadcastRealtimeEvent({ table: "Settings", action: "UPDATE_CONFIG", data: config });
     return { success: true };
   } catch (err: any) {
     console.error("Neon DB Error (updateConfig):", err);
@@ -378,6 +386,7 @@ export async function toggleAnnounceResults(announce: boolean): Promise<ActionRe
       WHERE id = 'global';
     `;
     await logAudit(announce ? "UNLOCK_LEADERBOARD" : "LOCK_LEADERBOARD", `Leaderboard announced: ${announce}`);
+    await broadcastRealtimeEvent({ table: "Settings", action: "TOGGLE_BROADCAST", data: { announce } });
     return { success: true };
   } catch (err: any) {
     console.error("Neon DB Error (toggleAnnounceResults):", err);
@@ -406,6 +415,7 @@ export async function updateCriteria(criteriaList: ScoringCriteria[]): Promise<A
     }
 
     await logAudit("UPDATE_CRITERIA", `Updated ${criteriaList.length} criteria`);
+    await broadcastRealtimeEvent({ table: "Criteria", action: "UPDATE_CRITERIA" });
     return { success: true };
   } catch (err: any) {
     console.error("Neon DB Error (updateCriteria):", err);
@@ -474,6 +484,7 @@ export async function submitScores(score: ScoreRecord): Promise<ActionResult> {
     `;
 
     await logAudit("SUBMIT_SCORES", `Judge ${score.judgeId} submitted scores for team ${score.teamId} (Total: ${score.totalScore})`, score.judgeId);
+    await broadcastRealtimeEvent({ table: "Score", action: "SUBMIT_SCORES", data: { teamId: score.teamId, judgeId: score.judgeId } });
 
     return { success: true };
   } catch (err: any) {
