@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { 
   ShieldCheck, 
@@ -75,6 +75,7 @@ export default function AdminPage() {
   // Loading indicator states
   const [dbLoading, setDbLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const isInitialLoadRef = useRef(true);
 
   useEffect(() => {
     initDatabase();
@@ -82,26 +83,33 @@ export default function AdminPage() {
     const session = sessionStorage.getItem("admin_session");
     if (session === "authorized") {
       setIsAdmin(true);
-      fetchDbData();
+      fetchDbData(false);
+    } else {
+      setDbLoading(false);
     }
   }, []);
 
-  const fetchDbData = async () => {
-    setDbLoading(true);
+  const fetchDbData = async (isBackground = false) => {
+    if (!isBackground && isInitialLoadRef.current) {
+      setDbLoading(true);
+    }
     try {
-      const jList = await getJudges();
-      const tList = await getTeams();
-      const sList = await getScores();
-      const config = await getConfig();
-      const lList = await getLeaderboard();
+      const [jList, tList, sList, config, lList] = await Promise.all([
+        getJudges(),
+        getTeams(),
+        getScores(),
+        getConfig(),
+        getLeaderboard(),
+      ]);
 
-      setJudges(jList);
-      setTeams(tList);
-      setScores(sList);
-      setCriteria(config.criteriaList);
-      setAnnounceResults(config.announceResults);
-      setLeaderboard(lList);
-      setTimerDuration(Math.round((config.timerDuration || 480) / 60));
+      setJudges(jList || []);
+      setTeams(tList || []);
+      setScores(sList || []);
+      setCriteria(config?.criteriaList || []);
+      setAnnounceResults(Boolean(config?.announceResults));
+      setLeaderboard(lList || []);
+      setTimerDuration(Math.round((config?.timerDuration || 480) / 60));
+      isInitialLoadRef.current = false;
     } catch (err) {
       console.error("Transmission breakdown:", err);
     } finally {
@@ -109,10 +117,10 @@ export default function AdminPage() {
     }
   };
 
-  // Realtime WebSocket sync — auto-refresh when DB changes
+  // Realtime WebSocket sync — auto-refresh silently when DB changes
   const handleRealtimeChange = useCallback(() => {
     if (isAdmin) {
-      fetchDbData();
+      fetchDbData(true);
     }
   }, [isAdmin]);
 
@@ -120,6 +128,7 @@ export default function AdminPage() {
     tables: ["pals_scores", "pals_teams", "pals_judges", "pals_config"],
     onDataChange: handleRealtimeChange,
     enabled: isAdmin,
+    intervalMs: 3500,
   });
 
   const handleSaveTimer = async () => {
@@ -470,7 +479,7 @@ export default function AdminPage() {
             <CyberButton
               variant="magenta"
               size="sm"
-              onClick={fetchDbData}
+              onClick={() => fetchDbData(false)}
               className="flex items-center gap-1.5"
             >
               <RefreshCw className="w-3.5 h-3.5" /> REFRESH

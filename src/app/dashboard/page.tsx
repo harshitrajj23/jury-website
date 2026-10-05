@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { 
   LogOut, 
@@ -54,24 +54,35 @@ export default function JudgeDashboardPage() {
   // UX States
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const isInitialLoadRef = useRef(true);
+  const selectedTeamRef = useRef<Team | null>(null);
+
+  useEffect(() => {
+    selectedTeamRef.current = selectedTeam;
+  }, [selectedTeam]);
   
-  const fetchData = async (judgeId: string) => {
-    setLoading(true);
+  const fetchData = async (judgeId: string, isBackground = false) => {
+    if (!isBackground && isInitialLoadRef.current) {
+      setLoading(true);
+    }
     try {
-      const allTeams = await getTeams();
-      const allScores = await getScores();
-      const config = await getConfig();
+      const [allTeams, allScores, config] = await Promise.all([
+        getTeams(),
+        getScores(),
+        getConfig(),
+      ]);
       
-      setTeams(allTeams);
-      setScores(allScores);
-      setCriteria(config.criteriaList);
-      setAnnounceResults(config.announceResults);
-      setTimerDuration(config.timerDuration || 480);
+      setTeams(allTeams || []);
+      setScores(allScores || []);
+      setCriteria(config?.criteriaList || []);
+      setAnnounceResults(Boolean(config?.announceResults));
+      setTimerDuration(config?.timerDuration || 480);
       
-      // Auto-select first team if available
-      if (allTeams.length > 0) {
-        handleSelectTeam(allTeams[0], allScores, config.criteriaList, judgeId);
+      // Auto-select first team ONLY on initial load if none selected yet
+      if (!selectedTeamRef.current && allTeams && allTeams.length > 0) {
+        handleSelectTeam(allTeams[0], allScores || [], config?.criteriaList || [], judgeId);
       }
+      isInitialLoadRef.current = false;
     } catch (err) {
       console.error("Transmission error:", err);
     } finally {
@@ -101,14 +112,14 @@ export default function JudgeDashboardPage() {
       setSignOffDate(today);
     });
     
-    fetchData(parsedJudge.id);
+    fetchData(parsedJudge.id, false);
   }, [router]);
 
-  // Realtime WebSocket sync — auto-refresh when DB changes
+  // Realtime WebSocket sync — auto-refresh silently when DB changes
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const handleRealtimeChange = useCallback(() => {
     if (judge) {
-      fetchData(judge.id);
+      fetchData(judge.id, true);
     }
   }, [judge]);
 
@@ -116,6 +127,7 @@ export default function JudgeDashboardPage() {
     tables: ["pals_scores", "pals_teams", "pals_config"],
     onDataChange: handleRealtimeChange,
     enabled: !!judge,
+    intervalMs: 3500,
   });
 
   const handleSelectTeam = (

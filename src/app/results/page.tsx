@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import confetti from "canvas-confetti";
 import { 
@@ -24,6 +24,7 @@ export default function LeaderboardPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [expandedTeams, setExpandedTeams] = useState<Record<string, boolean>>({});
+  const confettiTriggeredRef = useRef(false);
 
   const toggleTeam = (teamId: string) => {
     setExpandedTeams(prev => ({
@@ -56,7 +57,8 @@ export default function LeaderboardPage() {
   }, [fetchLeaderboard]);
 
   useEffect(() => {
-    if (announced && leaderboard.length > 0) {
+    if (announced && leaderboard.length > 0 && !confettiTriggeredRef.current) {
+      confettiTriggeredRef.current = true;
       const duration = 4 * 1000;
       const end = Date.now() + duration;
 
@@ -94,6 +96,7 @@ export default function LeaderboardPage() {
   const realtimeStatus = useRealtimeSync({
     tables: ["pals_scores", "pals_config"],
     onDataChange: handleRealtimeChange,
+    intervalMs: 3500,
   });
 
 
