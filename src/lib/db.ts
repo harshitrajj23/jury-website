@@ -47,11 +47,24 @@ export async function initDatabase(): Promise<ActionResult> {
       );
     `;
 
-    // 4. Seed default config if missing
+    // 4. Seed default config and evaluation criteria if missing
+    const defaultCriteriaJson = JSON.stringify([
+      { id: "c_1", name: "Innovation & Problem Solving" },
+      { id: "c_2", name: "Technical Architecture & Execution" },
+      { id: "c_3", name: "User Interface & Experience (UI/UX)" },
+      { id: "c_4", name: "Business Viability & Scalability" },
+      { id: "c_5", name: "Pitch Presentation & Q&A" }
+    ]);
+
     await sql`
       INSERT INTO pals_config (id, "announceResults", "criteriaList", "timerDuration")
-      VALUES ('main', FALSE, '[]'::jsonb, 480)
-      ON CONFLICT (id) DO NOTHING;
+      VALUES ('main', FALSE, ${defaultCriteriaJson}::jsonb, 480)
+      ON CONFLICT (id) DO UPDATE SET
+        "criteriaList" = CASE 
+          WHEN pals_config."criteriaList" IS NULL OR pals_config."criteriaList" = '[]'::jsonb 
+          THEN ${defaultCriteriaJson}::jsonb 
+          ELSE pals_config."criteriaList" 
+        END;
     `;
 
     // 5. Create pals_scores table
