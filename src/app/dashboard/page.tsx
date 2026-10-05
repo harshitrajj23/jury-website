@@ -200,13 +200,17 @@ export default function JudgeDashboardPage() {
     };
 
     try {
-      await submitScores(record);
+      const res = await submitScores(record);
+      if (!res.success) {
+        alert(`FAIL: TRANSMISSION TIMEOUT / REJECTED.\n\n${res.error}`);
+        return;
+      }
       
       // Re-fetch scores to update locked state
       const updatedScores = await getScores();
       setScores(updatedScores);
-    } catch (err) {
-      alert("FAIL: TRANSMISSION TIMEOUT. PLEASE TRY AGAIN.");
+    } catch (err: any) {
+      alert(`FAIL: TRANSMISSION TIMEOUT. (${err?.message || "Database error"})`);
     } finally {
       setActionLoading(false);
     }

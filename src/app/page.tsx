@@ -74,12 +74,20 @@ export default function JudgeAuthPage() {
           setLoading(false);
           return;
         }
-        const newJudge = await addJudge({
+        const res = await addJudge({
           username: usernameVal,
           name: fullName.trim(),
           designation: designation.trim(),
           password,
         });
+
+        if (!res.success || !res.data) {
+          setError(res.error || "REGISTRATION FAILED.");
+          setLoading(false);
+          return;
+        }
+
+        const newJudge = res.data;
         sessionStorage.setItem("judge_session", JSON.stringify({
           id: newJudge.id,
           username: newJudge.username,

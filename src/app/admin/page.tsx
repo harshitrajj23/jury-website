@@ -134,11 +134,15 @@ export default function AdminPage() {
   const handleSaveTimer = async () => {
     setActionLoading(true);
     try {
-      await updateTimerDuration(timerDuration * 60); // convert minutes to seconds
+      const res = await updateTimerDuration(timerDuration * 60); // convert minutes to seconds
+      if (!res.success) {
+        alert(`FAIL: TIMER SETTING TRANSMISSION FAILURE.\n\n${res.error}`);
+        return;
+      }
       alert(`SYSTEM STATUS: TIME LIMIT SET TO ${timerDuration} MINUTES.`);
-      await fetchDbData();
-    } catch {
-      alert("FAIL: TIMER SETTING TRANSMISSION FAILURE.");
+      await fetchDbData(false);
+    } catch (err: any) {
+      alert(`FAIL: TIMER SETTING TRANSMISSION FAILURE. (${err?.message || "Database error"})`);
     } finally {
       setActionLoading(false);
     }
@@ -159,7 +163,7 @@ export default function AdminPage() {
 
     sessionStorage.setItem("admin_session", "authorized");
     setIsAdmin(true);
-    fetchDbData();
+    fetchDbData(false);
     setAuthLoading(false);
   };
 
@@ -174,12 +178,16 @@ export default function AdminPage() {
     if (!newJudgeName || !newJudgeDesg || !newJudgeUser || !newJudgePass) return;
     setActionLoading(true);
     try {
-      await addJudge({
+      const res = await addJudge({
         username: newJudgeUser,
         name: newJudgeName,
         designation: newJudgeDesg,
         password: newJudgePass,
       });
+      if (!res.success) {
+        alert(`FAIL: JUDGE REGISTRATION REJECTED.\n\n${res.error}`);
+        return;
+      }
       // Reset inputs
       setNewJudgeName("");
       setNewJudgeDesg("");
@@ -199,7 +207,11 @@ export default function AdminPage() {
     if (!confirm("WARNING: ALL SCORES SUBMITTED BY THIS JUDGE WILL BE ERASED. PROCEED?")) return;
     setActionLoading(true);
     try {
-      await removeJudge(id);
+      const res = await removeJudge(id);
+      if (!res.success) {
+        alert(`FAIL: TRANSACTION DELETION ABORTED.\n\n${res.error}`);
+        return;
+      }
       await fetchDbData(false);
     } catch (err: any) {
       alert(`FAIL: TRANSACTION DELETION ABORTED. (${err?.message || "Database error"})`);
@@ -214,7 +226,11 @@ export default function AdminPage() {
     if (!newTeamName.trim()) return;
     setActionLoading(true);
     try {
-      await addTeam(newTeamName.trim());
+      const res = await addTeam(newTeamName.trim());
+      if (!res.success) {
+        alert(`FAIL: TEAM REGISTRATION REJECTED.\n\n${res.error}`);
+        return;
+      }
       setNewTeamName("");
       await fetchDbData(false);
       alert("✅ TEAM REGISTERED SUCCESSFULLY.");
@@ -230,7 +246,11 @@ export default function AdminPage() {
     if (!confirm("WARNING: REMOVING THIS TEAM WILL DELETE ALL RECEIVED JUDGING SCORINGS. CONTINUANCE?")) return;
     setActionLoading(true);
     try {
-      await removeTeam(id);
+      const res = await removeTeam(id);
+      if (!res.success) {
+        alert(`FAIL: TEAM ELIMINATION FAILED.\n\n${res.error}`);
+        return;
+      }
       await fetchDbData(false);
     } catch (err: any) {
       alert(`FAIL: TEAM ELIMINATION FAILED. (${err?.message || "Database error"})`);
@@ -243,7 +263,11 @@ export default function AdminPage() {
     if (!confirm(isDisqualified ? "REINSTATE this team back to the active leaderboard?" : "DISQUALIFY this team? They will be removed from the leaderboard.")) return;
     setActionLoading(true);
     try {
-      await toggleDisqualifyTeam(id, name, !isDisqualified);
+      const res = await toggleDisqualifyTeam(id, name, !isDisqualified);
+      if (!res.success) {
+        alert(`FAIL: TEAM DISQUALIFICATION STATE TOGGLE FAILED.\n\n${res.error}`);
+        return;
+      }
       await fetchDbData(false);
     } catch (err: any) {
       alert(`FAIL: TEAM DISQUALIFICATION STATE TOGGLE FAILED. (${err?.message || "Database error"})`);
@@ -282,7 +306,11 @@ export default function AdminPage() {
   const handleSaveCriteria = async () => {
     setActionLoading(true);
     try {
-      await updateCriteria(criteria);
+      const res = await updateCriteria(criteria);
+      if (!res.success) {
+        alert(`FAIL: CONFIG TRANSMISSION FAILURE.\n\n${res.error}`);
+        return;
+      }
       alert("SYSTEM STATUS: SCORING PARAMETERS UPDATED.");
     } catch (err: any) {
       alert(`FAIL: CONFIG TRANSMISSION FAILURE. (${err?.message || "Database error"})`);
@@ -296,7 +324,11 @@ export default function AdminPage() {
     setActionLoading(true);
     try {
       const nextState = !announceResults;
-      await toggleAnnounceResults(nextState);
+      const res = await toggleAnnounceResults(nextState);
+      if (!res.success) {
+        alert(`FAIL: BROADCAST TOGGLE FAULT.\n\n${res.error}`);
+        return;
+      }
       setAnnounceResults(nextState);
     } catch (err: any) {
       alert(`FAIL: BROADCAST TOGGLE FAULT. (${err?.message || "Database error"})`);
@@ -310,7 +342,11 @@ export default function AdminPage() {
     if (!confirm("🚨 DESTROY ALL DATA? THIS WILL ERASE ALL JUDGES, TEAMS, CONFIGS, AND RATINGS RECORDED. THIS ACTION CANNOT BE UNDONE.")) return;
     setActionLoading(true);
     try {
-      await resetDatabase();
+      const res = await resetDatabase();
+      if (!res.success) {
+        alert(`FAIL: DECONSTRUCT TRIGGER REJECTED.\n\n${res.error}`);
+        return;
+      }
       await fetchDbData(false);
       alert("DATABASE RE-MOUNTED TO FACTORY DEFAULTS.");
     } catch (err: any) {
