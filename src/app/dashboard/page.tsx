@@ -21,8 +21,7 @@ import {
   getScores, 
   getConfig, 
   submitScores, 
-  initDatabase,
-  LeaderboardEntry
+  initDatabase
 } from "@/lib/db";
 import { Team, ScoringCriteria, ScoreRecord, Judge } from "@/lib/types";
 import { useRealtimeSync } from "@/lib/useRealtimeSync";

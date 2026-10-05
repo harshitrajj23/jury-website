@@ -35,10 +35,9 @@ import {
   initDatabase,
   getLeaderboard,
   updateTimerDuration,
-  toggleDisqualifyTeam,
-  LeaderboardEntry
+  toggleDisqualifyTeam
 } from "@/lib/db";
-import { Judge, Team, ScoringCriteria, ScoreRecord, AppConfig } from "@/lib/types";
+import { Judge, Team, ScoringCriteria, ScoreRecord, AppConfig, LeaderboardEntry } from "@/lib/types";
 import { useRealtimeSync } from "@/lib/useRealtimeSync";
 import CyberButton from "@/components/CyberButton";
 import CyberInput from "@/components/CyberInput";

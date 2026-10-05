@@ -13,7 +13,8 @@ import {
   ChevronDown,
   ChevronUp
 } from "lucide-react";
-import { getLeaderboard, getConfig, initDatabase, LeaderboardEntry } from "@/lib/db";
+import { getLeaderboard, getConfig, initDatabase } from "@/lib/db";
+import type { LeaderboardEntry } from "@/lib/types";
 import { useRealtimeSync } from "@/lib/useRealtimeSync";
 import CyberButton from "@/components/CyberButton";
 
