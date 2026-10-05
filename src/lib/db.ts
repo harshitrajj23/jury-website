@@ -3,12 +3,13 @@
 import type { Judge, Team, ScoringCriteria, ScoreRecord, AppConfig, LeaderboardEntry } from "./types";
 import { getDb } from "./neonClient";
 
-
+let tablesInitialized = false;
 
 /**
  * Initializes database schema in Neon Postgres automatically if tables do not exist.
  */
 export async function initDatabase(): Promise<void> {
+  if (tablesInitialized) return;
   try {
     const sql = getDb();
     
@@ -60,6 +61,8 @@ export async function initDatabase(): Promise<void> {
         PRIMARY KEY ("teamId", "judgeId")
       );
     `;
+
+    tablesInitialized = true;
   } catch (err) {
     console.error("Database initialization error (Neon DB):", err);
   }
@@ -68,6 +71,7 @@ export async function initDatabase(): Promise<void> {
 // JUDGES
 export async function getJudges(): Promise<Judge[]> {
   try {
+    await initDatabase();
     const sql = getDb();
     const rows = await sql`
       SELECT id, username, name, designation, password 
@@ -82,11 +86,26 @@ export async function getJudges(): Promise<Judge[]> {
 }
 
 export async function addJudge(judge: Omit<Judge, "id">): Promise<Judge> {
+  await initDatabase();
   const sql = getDb();
+  const usernameClean = judge.username.trim().toLowerCase();
+
+  // Check if username already exists
+  const existing = await sql`
+    SELECT id FROM pals_judges WHERE LOWER(username) = ${usernameClean} LIMIT 1
+  `;
+  if (existing && existing.length > 0) {
+    throw new Error(`Username "${usernameClean}" is already in use. Please choose another username.`);
+  }
+
   const newJudge: Judge = {
     ...judge,
     id: `j_${Date.now()}`,
+    username: usernameClean,
+    name: judge.name.trim(),
+    designation: judge.designation.trim(),
   };
+
   await sql`
     INSERT INTO pals_judges (id, username, name, designation, password)
     VALUES (${newJudge.id}, ${newJudge.username}, ${newJudge.name}, ${newJudge.designation}, ${newJudge.password || null})
@@ -95,13 +114,16 @@ export async function addJudge(judge: Omit<Judge, "id">): Promise<Judge> {
 }
 
 export async function removeJudge(id: string): Promise<void> {
+  await initDatabase();
   const sql = getDb();
   await sql`DELETE FROM pals_judges WHERE id = ${id}`;
+  await sql`DELETE FROM pals_scores WHERE "judgeId" = ${id}`;
 }
 
 // TEAMS
 export async function getTeams(): Promise<Team[]> {
   try {
+    await initDatabase();
     const sql = getDb();
     const rows = await sql`SELECT id, name FROM pals_teams ORDER BY id ASC`;
     return (rows || []) as Team[];
@@ -112,21 +134,25 @@ export async function getTeams(): Promise<Team[]> {
 }
 
 export async function addTeam(name: string): Promise<Team> {
+  await initDatabase();
   const sql = getDb();
   const newTeam: Team = {
     id: `t_${Date.now()}`,
-    name,
+    name: name.trim(),
   };
   await sql`INSERT INTO pals_teams (id, name) VALUES (${newTeam.id}, ${newTeam.name})`;
   return newTeam;
 }
 
 export async function removeTeam(id: string): Promise<void> {
+  await initDatabase();
   const sql = getDb();
   await sql`DELETE FROM pals_teams WHERE id = ${id}`;
+  await sql`DELETE FROM pals_scores WHERE "teamId" = ${id}`;
 }
 
 export async function toggleDisqualifyTeam(teamId: string, teamName: string, disqualify: boolean): Promise<void> {
+  await initDatabase();
   const sql = getDb();
   let newName = teamName;
   if (disqualify && !teamName.startsWith("[DISQUALIFIED]")) {
@@ -140,6 +166,7 @@ export async function toggleDisqualifyTeam(teamId: string, teamName: string, dis
 // CONFIG & CRITERIA
 export async function getConfig(): Promise<AppConfig> {
   try {
+    await initDatabase();
     const sql = getDb();
     const rows = await sql`
       SELECT "announceResults", "criteriaList", "timerDuration" 
@@ -175,11 +202,13 @@ export async function getConfig(): Promise<AppConfig> {
 }
 
 export async function updateTimerDuration(durationSeconds: number): Promise<void> {
+  await initDatabase();
   const sql = getDb();
   await sql`UPDATE pals_config SET "timerDuration" = ${durationSeconds} WHERE id = 'main'`;
 }
 
 export async function updateConfig(config: AppConfig): Promise<void> {
+  await initDatabase();
   const sql = getDb();
   const criteriaJson = JSON.stringify(config.criteriaList || []);
   await sql`
@@ -192,11 +221,13 @@ export async function updateConfig(config: AppConfig): Promise<void> {
 }
 
 export async function toggleAnnounceResults(announce: boolean): Promise<void> {
+  await initDatabase();
   const sql = getDb();
   await sql`UPDATE pals_config SET "announceResults" = ${announce} WHERE id = 'main'`;
 }
 
 export async function updateCriteria(criteriaList: ScoringCriteria[]): Promise<void> {
+  await initDatabase();
   const sql = getDb();
   const criteriaJson = JSON.stringify(criteriaList || []);
   await sql`UPDATE pals_config SET "criteriaList" = ${criteriaJson}::jsonb WHERE id = 'main'`;
@@ -205,6 +236,7 @@ export async function updateCriteria(criteriaList: ScoringCriteria[]): Promise<v
 // SCORES & EVALUATIONS
 export async function getScores(): Promise<ScoreRecord[]> {
   try {
+    await initDatabase();
     const sql = getDb();
     const rows = await sql`
       SELECT "teamId", "judgeId", scores, "totalScore", "submittedAt", "judgeSignOff" 
@@ -225,6 +257,7 @@ export async function getScores(): Promise<ScoreRecord[]> {
 }
 
 export async function submitScores(score: ScoreRecord): Promise<void> {
+  await initDatabase();
   const sql = getDb();
   const scoresJson = JSON.stringify(score.scores || {});
   const signOffJson = JSON.stringify(score.judgeSignOff || {});
@@ -290,6 +323,7 @@ export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
 
 // Database Reset
 export async function resetDatabase(): Promise<void> {
+  await initDatabase();
   const sql = getDb();
   await sql`DELETE FROM pals_scores WHERE "teamId" != 'impossible'`;
   await sql`DELETE FROM pals_teams WHERE id != 'impossible'`;

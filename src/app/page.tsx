@@ -88,8 +88,8 @@ export default function JudgeAuthPage() {
         }));
         router.push("/dashboard");
       }
-    } catch {
-      setError("TRANSMISSION ERROR: DATABASE DISCONNECTED.");
+    } catch (err: any) {
+      setError(err?.message ? `ERROR: ${err.message.toUpperCase()}` : "TRANSMISSION ERROR: DATABASE DISCONNECTED.");
     } finally {
       setLoading(false);
     }

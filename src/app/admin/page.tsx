@@ -185,9 +185,10 @@ export default function AdminPage() {
       setNewJudgeDesg("");
       setNewJudgeUser("");
       setNewJudgePass("");
-      await fetchDbData();
-    } catch {
-      alert("FAIL: JUDGE REGISTRATION REJECTED.");
+      await fetchDbData(false);
+      alert("✅ JUDGE REGISTERED SUCCESSFULLY.");
+    } catch (err: any) {
+      alert(`FAIL: JUDGE REGISTRATION REJECTED. (${err?.message || "Database connection error"})`);
     } finally {
       setActionLoading(false);
     }
@@ -199,9 +200,9 @@ export default function AdminPage() {
     setActionLoading(true);
     try {
       await removeJudge(id);
-      await fetchDbData();
-    } catch {
-      alert("FAIL: TRANSECTION DELETION ABORTED.");
+      await fetchDbData(false);
+    } catch (err: any) {
+      alert(`FAIL: TRANSACTION DELETION ABORTED. (${err?.message || "Database error"})`);
     } finally {
       setActionLoading(false);
     }
@@ -215,9 +216,10 @@ export default function AdminPage() {
     try {
       await addTeam(newTeamName.trim());
       setNewTeamName("");
-      await fetchDbData();
-    } catch {
-      alert("FAIL: TEAM PROTOTYPE REGISTRATION REJECTED.");
+      await fetchDbData(false);
+      alert("✅ TEAM REGISTERED SUCCESSFULLY.");
+    } catch (err: any) {
+      alert(`FAIL: TEAM REGISTRATION REJECTED. (${err?.message || "Database error"})`);
     } finally {
       setActionLoading(false);
     }
@@ -229,9 +231,9 @@ export default function AdminPage() {
     setActionLoading(true);
     try {
       await removeTeam(id);
-      await fetchDbData();
-    } catch {
-      alert("FAIL: TEAM ELIMINATION FAILED.");
+      await fetchDbData(false);
+    } catch (err: any) {
+      alert(`FAIL: TEAM ELIMINATION FAILED. (${err?.message || "Database error"})`);
     } finally {
       setActionLoading(false);
     }
@@ -242,9 +244,9 @@ export default function AdminPage() {
     setActionLoading(true);
     try {
       await toggleDisqualifyTeam(id, name, !isDisqualified);
-      await fetchDbData();
-    } catch {
-      alert("FAIL: TEAM DISQUALIFICATION STATE TOGGLE FAILED.");
+      await fetchDbData(false);
+    } catch (err: any) {
+      alert(`FAIL: TEAM DISQUALIFICATION STATE TOGGLE FAILED. (${err?.message || "Database error"})`);
     } finally {
       setActionLoading(false);
     }
@@ -282,8 +284,8 @@ export default function AdminPage() {
     try {
       await updateCriteria(criteria);
       alert("SYSTEM STATUS: SCORING PARAMETERS UPDATED.");
-    } catch {
-      alert("FAIL: CONFIG TRANSMISSION FAILURE.");
+    } catch (err: any) {
+      alert(`FAIL: CONFIG TRANSMISSION FAILURE. (${err?.message || "Database error"})`);
     } finally {
       setActionLoading(false);
     }
@@ -296,8 +298,8 @@ export default function AdminPage() {
       const nextState = !announceResults;
       await toggleAnnounceResults(nextState);
       setAnnounceResults(nextState);
-    } catch {
-      alert("FAIL: BROADCAST TOGGLE FAULT.");
+    } catch (err: any) {
+      alert(`FAIL: BROADCAST TOGGLE FAULT. (${err?.message || "Database error"})`);
     } finally {
       setActionLoading(false);
     }
@@ -309,10 +311,10 @@ export default function AdminPage() {
     setActionLoading(true);
     try {
       await resetDatabase();
-      await fetchDbData();
+      await fetchDbData(false);
       alert("DATABASE RE-MOUNTED TO FACTORY DEFAULTS.");
-    } catch {
-      alert("FAIL: DECONSTRUCT TRIGGER REJECTED.");
+    } catch (err: any) {
+      alert(`FAIL: DECONSTRUCT TRIGGER REJECTED. (${err?.message || "Database error"})`);
     } finally {
       setActionLoading(false);
     }

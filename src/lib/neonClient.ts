@@ -6,10 +6,9 @@ export function getDb(): NeonQueryFunction<false, false> {
   const connectionString = process.env.DATABASE_URL || process.env.DIRECT_URL;
   
   if (!connectionString) {
-    // Return a fallback no-op query function during static build / prerender if env var is not yet present
+    // If running in a server action or API call at runtime, notify user clearly
     const fallbackSql = (async () => {
-      console.warn("⚠️ DATABASE_URL is not set. Database query skipped.");
-      return [];
+      throw new Error("DATABASE_URL is not configured in Vercel. Please add your Neon connection string as DATABASE_URL in Vercel Project Settings -> Environment Variables.");
     }) as unknown as NeonQueryFunction<false, false>;
     return fallbackSql;
   }
