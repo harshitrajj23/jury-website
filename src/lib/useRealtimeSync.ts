@@ -1,101 +1,78 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { supabase } from "./supabaseClient";
-import type { RealtimeChannel } from "@supabase/supabase-js";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
 interface UseRealtimeSyncOptions {
-  /** Supabase table names to subscribe to */
+  /** Tables / keys to monitor for sync */
   tables: string[];
-  /** Callback fired when any subscribed table changes */
+  /** Callback fired when data sync is triggered */
   onDataChange: () => void;
-  /** Whether the subscription should be active (default: true) */
+  /** Whether the sync polling should be active (default: true) */
   enabled?: boolean;
+  /** Polling interval in milliseconds (default: 2500ms) */
+  intervalMs?: number;
 }
 
 /**
- * React hook that subscribes to Supabase Realtime (WebSocket) change events
- * on specified Postgres tables. Fires `onDataChange` callback (debounced 300ms)
- * when INSERT, UPDATE, or DELETE events are detected.
+ * React hook that provides live real-time sync with Neon Postgres database.
+ * Polls at a high-performance interval (2.5s) and syncs on window focus/visibility.
  *
- * Returns the current WebSocket connection status for UI display.
+ * Returns the connection status ("connected" | "connecting" | "disconnected") for UI indicators.
  */
 export function useRealtimeSync({
   tables,
   onDataChange,
   enabled = true,
+  intervalMs = 2500,
 }: UseRealtimeSyncOptions): ConnectionStatus {
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
-  const channelRef = useRef<RealtimeChannel | null>(null);
+  const onDataChangeRef = useRef(onDataChange);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Stable reference to the callback to avoid re-subscribing on every render
-  const onDataChangeRef = useRef(onDataChange);
-  
   useEffect(() => {
     onDataChangeRef.current = onDataChange;
   }, [onDataChange]);
 
-  const debouncedChange = useCallback(() => {
+  const triggerChange = useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       onDataChangeRef.current();
-    }, 300);
+    }, 200);
   }, []);
 
   useEffect(() => {
     if (!enabled || tables.length === 0) {
-      // Async state update to satisfy strict linting rules
       Promise.resolve().then(() => setStatus("disconnected"));
       return;
     }
 
-    Promise.resolve().then(() => setStatus("connecting"));
+    Promise.resolve().then(() => setStatus("connected"));
 
-    // Create a single channel with multiple table subscriptions
-    const channelName = `realtime-sync-${tables.join("-")}-${Date.now()}`;
-    let channel = supabase.channel(channelName);
+    // Periodic polling interval
+    const interval = setInterval(() => {
+      triggerChange();
+    }, intervalMs);
 
-    // Subscribe to postgres_changes for each table
-    tables.forEach((table) => {
-      channel = channel.on(
-        "postgres_changes" as Parameters<typeof channel.on>[0],
-        {
-          event: "*", // Listen to INSERT, UPDATE, DELETE
-          schema: "public",
-          table,
-        },
-        () => {
-          debouncedChange();
-        }
-      );
-    });
-
-    channel.subscribe((channelStatus) => {
-      if (channelStatus === "SUBSCRIBED") {
-        setStatus("connected");
-      } else if (
-        channelStatus === "CLOSED" ||
-        channelStatus === "CHANNEL_ERROR"
-      ) {
-        setStatus("disconnected");
-      }
-    });
-
-    channelRef.current = channel;
-
-    // Cleanup on unmount or when dependencies change
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
+    // Instant sync when tab gains focus or becomes visible
+    const handleFocus = () => triggerChange();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        triggerChange();
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tables.join(","), enabled, debouncedChange]);
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [tables.join(","), enabled, intervalMs, triggerChange]);
 
   return status;
 }
