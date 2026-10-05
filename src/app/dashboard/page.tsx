@@ -124,7 +124,7 @@ export default function JudgeDashboardPage() {
   }, [judge]);
 
   const realtimeStatus = useRealtimeSync({
-    tables: ["pals_scores", "pals_teams", "pals_config"],
+    tables: ["Score", "Team", "Settings", "Criteria"],
     onDataChange: handleRealtimeChange,
     enabled: !!judge,
     intervalMs: 3500,
@@ -357,7 +357,7 @@ export default function JudgeDashboardPage() {
                     </span>
                     <p className="text-[11px] text-gray-400">
                       Scores locked as read-only on database at {new Date(currentRecord.submittedAt).toLocaleTimeString()}.
-                      Sign-off verified under: {currentRecord.judgeSignOff.name} ({currentRecord.judgeSignOff.designation})
+                      Sign-off verified under: {currentRecord.judgeSignOff?.name || "Jurist"} ({currentRecord.judgeSignOff?.designation || "Judge"})
                     </p>
                   </div>
                 </div>

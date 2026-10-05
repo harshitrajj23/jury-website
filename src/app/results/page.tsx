@@ -94,7 +94,7 @@ export default function LeaderboardPage() {
   }, [fetchLeaderboard]);
 
   const realtimeStatus = useRealtimeSync({
-    tables: ["pals_scores", "pals_config"],
+    tables: ["Score", "Settings", "Team"],
     onDataChange: handleRealtimeChange,
     intervalMs: 3500,
   });

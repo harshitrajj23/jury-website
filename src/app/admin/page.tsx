@@ -125,7 +125,7 @@ export default function AdminPage() {
   }, [isAdmin]);
 
   const realtimeStatus = useRealtimeSync({
-    tables: ["pals_scores", "pals_teams", "pals_judges", "pals_config"],
+    tables: ["Score", "Team", "User", "Criteria", "Settings"],
     onDataChange: handleRealtimeChange,
     enabled: isAdmin,
     intervalMs: 3500,

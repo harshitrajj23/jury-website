@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { KeyRound, User, Radio, Cpu, BadgeCheck, Briefcase } from "lucide-react";
-import { getJudges, addJudge, initDatabase } from "@/lib/db";
+import { getJudges, addJudge, initDatabase, verifyUserLogin } from "@/lib/db";
 import CyberInput from "@/components/CyberInput";
 import CyberButton from "@/components/CyberButton";
 
@@ -40,19 +40,17 @@ export default function JudgeAuthPage() {
     setLoading(true);
 
     try {
-      const judges = await getJudges();
       const usernameVal = username.trim().toLowerCase();
 
       if (isLogin) {
         // --- LOGIN ---
-        const matched = judges.find(
-          (j) => j.username.toLowerCase() === usernameVal && j.password === password
-        );
-        if (!matched) {
-          setError("INVALID CREDENTIALS. ACCESS DENIED.");
+        const authRes = await verifyUserLogin(usernameVal, password);
+        if (!authRes.success || !authRes.data) {
+          setError(authRes.error || "INVALID CREDENTIALS. ACCESS DENIED.");
           setLoading(false);
           return;
         }
+        const matched = authRes.data;
         sessionStorage.setItem("judge_session", JSON.stringify({
           id: matched.id,
           username: matched.username,
@@ -65,12 +63,6 @@ export default function JudgeAuthPage() {
         // --- REGISTER ---
         if (!fullName.trim() || !designation.trim() || !usernameVal || !password) {
           setError("ALL FIELDS ARE REQUIRED FOR REGISTRATION.");
-          setLoading(false);
-          return;
-        }
-        const exists = judges.find((j) => j.username.toLowerCase() === usernameVal);
-        if (exists) {
-          setError("USERNAME ALREADY IN USE. CHOOSE ANOTHER.");
           setLoading(false);
           return;
         }
