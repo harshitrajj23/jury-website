@@ -37,3 +37,15 @@ export interface AppConfig {
   timerDuration: number; // in seconds
   disqualifiedTeams?: string[];
 }
+
+export interface LeaderboardEntry {
+  rank: number;
+  teamId: string;
+  teamName: string;
+  averageScore: number;
+  judgeSubmissions: {
+    judgeId: string;
+    judgeName: string;
+    totalScore: number;
+  }[];
+}
