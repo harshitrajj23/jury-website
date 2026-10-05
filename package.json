@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "db:check": "node scripts/check-neon-db.js"
+    "db:check": "node scripts/check-neon-db.js",
+    "db:sync": "node scripts/sync-supabase-to-neon.js"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.2.0",
