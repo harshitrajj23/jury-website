@@ -18,7 +18,8 @@ import {
   Layers,
   PlusCircle,
   Edit3,
-  Calendar
+  Calendar,
+  X
 } from "lucide-react";
 import { 
   getJudges, 
@@ -91,6 +92,10 @@ export default function AdminConsolePage() {
   const [editEventOrgLogo, setEditEventOrgLogo] = useState("");
   const [editEventDate, setEditEventDate] = useState("");
   const [editEventStatus, setEditEventStatus] = useState("active");
+
+  // Event Modals state
+  const [isEditEventModalOpen, setIsEditEventModalOpen] = useState(false);
+  const [isCreateEventModalOpen, setIsCreateEventModalOpen] = useState(false);
 
   // Loading indicator states
   const [dbLoading, setDbLoading] = useState(true);
@@ -212,6 +217,7 @@ export default function AdminConsolePage() {
   // ==============================================================
   const handleCreateEvent = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (actionLoading) return;
     if (!newEventName.trim()) return;
     setActionLoading(true);
     try {
@@ -236,6 +242,7 @@ export default function AdminConsolePage() {
       setNewEventLogo("");
       setNewEventOrgLogo("");
       setNewEventDate("");
+      setIsCreateEventModalOpen(false);
       alert(`✅ EVENT "${res.data.name}" CREATED SUCCESSFULLY.`);
       handleEventSwitch(res.data.id);
     } catch (err: any) {
@@ -247,6 +254,7 @@ export default function AdminConsolePage() {
 
   const handleUpdateCurrentEvent = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (actionLoading) return;
     if (!editEventName.trim()) return;
     setActionLoading(true);
     try {
@@ -265,6 +273,7 @@ export default function AdminConsolePage() {
         return;
       }
 
+      setIsEditEventModalOpen(false);
       alert(`✅ EVENT "${res.data.name}" SETTINGS SAVED SUCCESSFULLY.`);
       await fetchDbData(selectedEventId, false);
     } catch (err: any) {
@@ -731,151 +740,105 @@ export default function AdminConsolePage() {
         {/* ============================================================== */}
         {activeTab === "events" && (
           <div className="flex flex-col gap-6">
-            {/* Edit Current Selected Event Settings */}
-            <div className="cyber-glass border border-cyber-magenta/30 p-6 flex flex-col gap-4">
-              <div className="flex items-center justify-between border-b border-cyber-magenta/20 pb-3 flex-wrap gap-2">
+            {/* Header & Current Event Card */}
+            <div className="cyber-glass border border-cyber-magenta/30 p-6 flex flex-col gap-5">
+              <div className="flex items-center justify-between border-b border-cyber-magenta/20 pb-3 flex-wrap gap-3">
                 <div className="flex items-center gap-2">
-                  <Edit3 className="w-4 h-4 text-cyber-magenta" />
-                  <h2 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase">
-                    ⚙️ EVENT SETTINGS & IDENTITY: {currentEvent?.name?.toUpperCase() || selectedEventId.toUpperCase()}
+                  <Layers className="w-5 h-5 text-cyber-magenta" />
+                  <h2 className="font-orbitron text-base font-bold text-cyber-magenta tracking-wide uppercase">
+                    EVENT MANAGEMENT
                   </h2>
                 </div>
-                <span className="font-mono text-[10px] text-gray-400">
-                  ID: {selectedEventId}
-                </span>
+                <div className="flex items-center gap-3">
+                  <CyberButton
+                    type="button"
+                    variant="magenta"
+                    size="sm"
+                    onClick={() => {
+                      if (currentEvent) {
+                        setEditEventName(currentEvent.name || "");
+                        setEditEventSubtitle(currentEvent.subtitle || "");
+                        setEditEventOrganizer(currentEvent.organizer || "");
+                        setEditEventLogo(currentEvent.logo || "");
+                        setEditEventOrgLogo(currentEvent.organizerLogo || "");
+                        setEditEventDate(currentEvent.date || "");
+                        setEditEventStatus(currentEvent.status || "active");
+                      }
+                      setIsEditEventModalOpen(true);
+                    }}
+                    className="flex items-center gap-1.5"
+                  >
+                    <Edit3 className="w-4 h-4" /> EDIT EVENT
+                  </CyberButton>
+                  <CyberButton
+                    type="button"
+                    variant="cyan"
+                    size="sm"
+                    onClick={() => setIsCreateEventModalOpen(true)}
+                    className="flex items-center gap-1.5"
+                  >
+                    <PlusCircle className="w-4 h-4" /> + CREATE NEW EVENT
+                  </CyberButton>
+                </div>
               </div>
 
-              <form onSubmit={handleUpdateCurrentEvent} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                <CyberInput
-                  variant="magenta"
-                  label="EVENT NAME"
-                  placeholder="e.g. TechNova Hackathon"
-                  value={editEventName}
-                  onChange={(e) => setEditEventName(e.target.value)}
-                  disabled={actionLoading}
-                  required
-                />
-                <CyberInput
-                  variant="magenta"
-                  label="ORGANIZER / CLUB NAME"
-                  placeholder="e.g. Computer Science Club"
-                  value={editEventOrganizer}
-                  onChange={(e) => setEditEventOrganizer(e.target.value)}
-                  disabled={actionLoading}
-                />
-                <CyberInput
-                  variant="magenta"
-                  label="SUBTITLE / DESCRIPTION"
-                  placeholder="e.g. Annual Collegiate Innovation Challenge"
-                  value={editEventSubtitle}
-                  onChange={(e) => setEditEventSubtitle(e.target.value)}
-                  disabled={actionLoading}
-                />
-                <CyberInput
-                  variant="magenta"
-                  label="EVENT LOGO (URL OR PATH)"
-                  placeholder="e.g. /logos/event-logo.svg or https://..."
-                  value={editEventLogo}
-                  onChange={(e) => setEditEventLogo(e.target.value)}
-                  disabled={actionLoading}
-                />
-                <CyberInput
-                  variant="magenta"
-                  label="ORGANIZER LOGO (URL OR PATH)"
-                  placeholder="e.g. /logos/club-logo.svg or https://..."
-                  value={editEventOrgLogo}
-                  onChange={(e) => setEditEventOrgLogo(e.target.value)}
-                  disabled={actionLoading}
-                />
-                <CyberInput
-                  variant="magenta"
-                  label="EVENT DATE / SCHEDULE"
-                  placeholder="e.g. 2026-10-15 or Oct 15-16, 2026"
-                  value={editEventDate}
-                  onChange={(e) => setEditEventDate(e.target.value)}
-                  disabled={actionLoading}
-                />
-
-                <div className="sm:col-span-2 lg:col-span-3 flex justify-end mt-2">
-                  <CyberButton type="submit" variant="magenta" disabled={actionLoading} className="flex items-center gap-2">
-                    <Save className="w-4 h-4" /> {actionLoading ? "SAVING..." : "SAVE SELECTED EVENT SETTINGS"}
-                  </CyberButton>
+              {/* Current Active Event Banner */}
+              <div className="bg-cyber-bg-darker/70 border border-cyber-magenta/40 p-4 rounded-none flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-4 min-w-0">
+                  <div className="w-12 h-12 border border-cyber-magenta/50 bg-black/40 flex items-center justify-center shrink-0">
+                    {currentEvent?.logo ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img src={currentEvent.logo} alt="" className="max-w-full max-h-full object-contain p-1" />
+                    ) : (
+                      <Layers className="w-6 h-6 text-cyber-magenta" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[10px] font-mono uppercase px-2 py-0.5 bg-cyber-magenta/20 border border-cyber-magenta/40 text-cyber-magenta font-bold">
+                        CURRENT ACTIVE EVENT
+                      </span>
+                      <span className="text-[10px] font-mono text-gray-400">
+                        ID: {selectedEventId}
+                      </span>
+                    </div>
+                    <h3 className="font-orbitron text-lg font-bold text-white uppercase tracking-wider mt-1 truncate">
+                      {currentEvent?.name || selectedEventId}
+                    </h3>
+                    <div className="flex items-center gap-3 text-xs text-gray-400 font-mono mt-0.5 flex-wrap">
+                      {currentEvent?.organizer && (
+                        <span className="text-cyber-cyan font-bold">Organized by {currentEvent.organizer}</span>
+                      )}
+                      {currentEvent?.subtitle && (
+                        <span>• {currentEvent.subtitle}</span>
+                      )}
+                      {currentEvent?.date && (
+                        <span>• 📅 {currentEvent.date}</span>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </form>
-            </div>
 
-            {/* Create New Event Form */}
-            <div className="cyber-glass border border-cyber-magenta/20 p-6 flex flex-col gap-4">
-              <h2 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase border-b border-cyber-magenta/15 pb-2">
-                ➕ CREATE NEW EVALUATION EVENT / COMPETITION
-              </h2>
-
-              <form onSubmit={handleCreateEvent} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                <CyberInput
-                  variant="magenta"
-                  label="EVENT NAME"
-                  placeholder="e.g. InnovateX 2026"
-                  value={newEventName}
-                  onChange={(e) => setNewEventName(e.target.value)}
-                  disabled={actionLoading}
-                  required
-                />
-                <CyberInput
-                  variant="magenta"
-                  label="ORGANIZER / CLUB NAME"
-                  placeholder="e.g. Electronics Society"
-                  value={newEventOrganizer}
-                  onChange={(e) => setNewEventOrganizer(e.target.value)}
-                  disabled={actionLoading}
-                />
-                <CyberInput
-                  variant="magenta"
-                  label="SUBTITLE / DESCRIPTION"
-                  placeholder="e.g. Hardware & AI Exhibition"
-                  value={newEventSubtitle}
-                  onChange={(e) => setNewEventSubtitle(e.target.value)}
-                  disabled={actionLoading}
-                />
-                <CyberInput
-                  variant="magenta"
-                  label="EVENT LOGO (URL / PATH)"
-                  placeholder="e.g. /logos/event-logo.svg"
-                  value={newEventLogo}
-                  onChange={(e) => setNewEventLogo(e.target.value)}
-                  disabled={actionLoading}
-                />
-                <CyberInput
-                  variant="magenta"
-                  label="ORGANIZER LOGO (URL / PATH)"
-                  placeholder="e.g. /logos/organizer-logo.svg"
-                  value={newEventOrgLogo}
-                  onChange={(e) => setNewEventOrgLogo(e.target.value)}
-                  disabled={actionLoading}
-                />
-                <CyberInput
-                  variant="magenta"
-                  label="EVENT DATE"
-                  placeholder="e.g. 2026-11-20"
-                  value={newEventDate}
-                  onChange={(e) => setNewEventDate(e.target.value)}
-                  disabled={actionLoading}
-                />
-
-                <div className="flex items-end">
-                  <CyberButton type="submit" variant="magenta" fullWidth disabled={actionLoading}>
-                    {actionLoading ? "CREATING..." : "CREATE & INITIALIZE EVENT"}
-                  </CyberButton>
+                <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                  <span className="text-xs font-mono px-2.5 py-1 bg-cyber-green/15 text-cyber-green border border-cyber-green/30 font-bold uppercase tracking-widest">
+                    ACTIVE
+                  </span>
                 </div>
-              </form>
+              </div>
             </div>
 
             {/* List of Registered Events */}
             <div className="cyber-glass border border-cyber-magenta/20 p-6 flex flex-col gap-4">
-              <h2 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase border-b border-cyber-magenta/15 pb-2">
-                🌐 REGISTERED PLATFORM EVENTS ({events.length})
-              </h2>
+              <div className="flex items-center justify-between border-b border-cyber-magenta/15 pb-2 flex-wrap gap-2">
+                <h3 className="font-orbitron text-sm font-bold text-gray-200 tracking-wide uppercase">
+                  REGISTERED EVENTS ({events.length})
+                </h3>
+                <span className="text-xs font-mono text-gray-400">
+                  Switch or manage registered platform events
+                </span>
+              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {events.map((ev) => {
                   const isCurrent = ev.id === selectedEventId;
                   return (
@@ -889,7 +852,7 @@ export default function AdminConsolePage() {
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
                             {ev.logo ? (
                               /* eslint-disable-next-line @next/next/no-img-element */
                               <img src={ev.logo} alt="" className="h-5 max-w-[80px] object-contain" />
@@ -898,13 +861,13 @@ export default function AdminConsolePage() {
                               /* eslint-disable-next-line @next/next/no-img-element */
                               <img src={ev.organizerLogo} alt="" className="h-5 max-w-[80px] object-contain" />
                             ) : null}
-                            <h3 className="font-orbitron font-bold text-white text-sm uppercase truncate">
-                              {ev.name}
-                            </h3>
                           </div>
-                          {ev.subtitle && <p className="text-xs text-gray-400 font-mono mt-0.5">{ev.subtitle}</p>}
-                          {ev.organizer && <p className="text-[10px] text-cyber-cyan font-mono mt-0.5">By {ev.organizer}</p>}
-                          <div className="flex items-center gap-2 mt-1 text-[10px] text-gray-500 font-mono flex-wrap">
+                          <h4 className="font-orbitron font-bold text-white text-sm uppercase truncate">
+                            {ev.name}
+                          </h4>
+                          {ev.organizer && <p className="text-xs text-cyber-cyan font-mono mt-0.5">{ev.organizer}</p>}
+                          {ev.subtitle && <p className="text-[11px] text-gray-400 font-mono mt-0.5 line-clamp-1">{ev.subtitle}</p>}
+                          <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-500 font-mono flex-wrap">
                             <span>ID: {ev.id}</span>
                             {ev.date && (
                               <>
@@ -923,14 +886,31 @@ export default function AdminConsolePage() {
                       </div>
 
                       <div className="flex justify-end gap-2 border-t border-white/5 pt-2">
-                        {!isCurrent && (
+                        {isCurrent ? (
+                          <CyberButton
+                            variant="magenta"
+                            size="sm"
+                            onClick={() => {
+                              setEditEventName(ev.name || "");
+                              setEditEventSubtitle(ev.subtitle || "");
+                              setEditEventOrganizer(ev.organizer || "");
+                              setEditEventLogo(ev.logo || "");
+                              setEditEventOrgLogo(ev.organizerLogo || "");
+                              setEditEventDate(ev.date || "");
+                              setEditEventStatus(ev.status || "active");
+                              setIsEditEventModalOpen(true);
+                            }}
+                          >
+                            <Edit3 className="w-3.5 h-3.5" /> EDIT EVENT
+                          </CyberButton>
+                        ) : (
                           <CyberButton
                             variant="cyan"
                             size="sm"
                             onClick={() => handleEventSwitch(ev.id)}
                             disabled={actionLoading}
                           >
-                            SWITCH TO THIS EVENT
+                            SWITCH
                           </CyberButton>
                         )}
                       </div>
@@ -939,6 +919,219 @@ export default function AdminConsolePage() {
                 })}
               </div>
             </div>
+
+            {/* EDIT EVENT MODAL DIALOG */}
+            {isEditEventModalOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 overflow-y-auto">
+                <div className="relative w-full max-w-2xl bg-cyber-bg-dark border border-cyber-magenta p-6 shadow-[0_0_30px_rgba(217,70,239,0.3)] my-8">
+                  <div className="flex items-center justify-between border-b border-cyber-magenta/30 pb-3 mb-4">
+                    <div className="flex items-center gap-2">
+                      <Edit3 className="w-5 h-5 text-cyber-magenta" />
+                      <h3 className="font-orbitron text-base font-bold text-white uppercase tracking-wider">
+                        EDIT EVENT SETTINGS
+                      </h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditEventModalOpen(false)}
+                      className="text-gray-400 hover:text-white transition-colors"
+                      aria-label="Close modal"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleUpdateCurrentEvent} className="flex flex-col gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <CyberInput
+                        variant="magenta"
+                        label="EVENT NAME"
+                        placeholder="e.g. TechNova Hackathon"
+                        value={editEventName}
+                        onChange={(e) => setEditEventName(e.target.value)}
+                        disabled={actionLoading}
+                        required
+                      />
+                      <CyberInput
+                        variant="magenta"
+                        label="ORGANIZER / CLUB NAME"
+                        placeholder="e.g. Computer Science Club"
+                        value={editEventOrganizer}
+                        onChange={(e) => setEditEventOrganizer(e.target.value)}
+                        disabled={actionLoading}
+                      />
+                      <CyberInput
+                        variant="magenta"
+                        label="SUBTITLE / DESCRIPTION"
+                        placeholder="e.g. Annual Collegiate Innovation Challenge"
+                        value={editEventSubtitle}
+                        onChange={(e) => setEditEventSubtitle(e.target.value)}
+                        disabled={actionLoading}
+                      />
+                      <CyberInput
+                        variant="magenta"
+                        label="EVENT DATE / SCHEDULE"
+                        placeholder="e.g. 2026-10-15 or Oct 15-16, 2026"
+                        value={editEventDate}
+                        onChange={(e) => setEditEventDate(e.target.value)}
+                        disabled={actionLoading}
+                      />
+                      <CyberInput
+                        variant="magenta"
+                        label="EVENT LOGO (URL OR PATH)"
+                        placeholder="e.g. /logos/event-logo.svg or https://..."
+                        value={editEventLogo}
+                        onChange={(e) => setEditEventLogo(e.target.value)}
+                        disabled={actionLoading}
+                      />
+                      <CyberInput
+                        variant="magenta"
+                        label="ORGANIZER LOGO (URL OR PATH)"
+                        placeholder="e.g. /logos/club-logo.svg or https://..."
+                        value={editEventOrgLogo}
+                        onChange={(e) => setEditEventOrgLogo(e.target.value)}
+                        disabled={actionLoading}
+                      />
+                      <div className="sm:col-span-2">
+                        <label className="block text-[11px] font-mono tracking-wider text-gray-400 uppercase mb-1">
+                          EVENT STATUS
+                        </label>
+                        <select
+                          value={editEventStatus}
+                          onChange={(e) => setEditEventStatus(e.target.value)}
+                          disabled={actionLoading}
+                          className="w-full bg-cyber-bg-darker border border-cyber-magenta/40 px-3 py-2 text-sm text-white font-mono outline-none focus:border-cyber-magenta"
+                        >
+                          <option value="active">ACTIVE</option>
+                          <option value="completed">COMPLETED</option>
+                          <option value="upcoming">UPCOMING</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-3 border-t border-cyber-magenta/20 pt-4 mt-2">
+                      <CyberButton
+                        type="button"
+                        variant="cyan"
+                        size="md"
+                        onClick={() => setIsEditEventModalOpen(false)}
+                        disabled={actionLoading}
+                      >
+                        CANCEL
+                      </CyberButton>
+                      <CyberButton
+                        type="submit"
+                        variant="magenta"
+                        size="md"
+                        disabled={actionLoading}
+                        className="flex items-center gap-2"
+                      >
+                        <Save className="w-4 h-4" /> {actionLoading ? "SAVING..." : "SAVE CHANGES"}
+                      </CyberButton>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {/* CREATE EVENT MODAL DIALOG */}
+            {isCreateEventModalOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 overflow-y-auto">
+                <div className="relative w-full max-w-2xl bg-cyber-bg-dark border border-cyber-cyan p-6 shadow-[0_0_30px_rgba(6,182,212,0.3)] my-8">
+                  <div className="flex items-center justify-between border-b border-cyber-cyan/30 pb-3 mb-4">
+                    <div className="flex items-center gap-2">
+                      <PlusCircle className="w-5 h-5 text-cyber-cyan" />
+                      <h3 className="font-orbitron text-base font-bold text-white uppercase tracking-wider">
+                        CREATE NEW EVENT
+                      </h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsCreateEventModalOpen(false)}
+                      className="text-gray-400 hover:text-white transition-colors"
+                      aria-label="Close modal"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleCreateEvent} className="flex flex-col gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <CyberInput
+                        variant="cyan"
+                        label="EVENT NAME"
+                        placeholder="e.g. InnovateX 2026"
+                        value={newEventName}
+                        onChange={(e) => setNewEventName(e.target.value)}
+                        disabled={actionLoading}
+                        required
+                      />
+                      <CyberInput
+                        variant="cyan"
+                        label="ORGANIZER / CLUB NAME"
+                        placeholder="e.g. Engineering Society"
+                        value={newEventOrganizer}
+                        onChange={(e) => setNewEventOrganizer(e.target.value)}
+                        disabled={actionLoading}
+                      />
+                      <CyberInput
+                        variant="cyan"
+                        label="SUBTITLE / DESCRIPTION"
+                        placeholder="e.g. Hardware & AI Exhibition"
+                        value={newEventSubtitle}
+                        onChange={(e) => setNewEventSubtitle(e.target.value)}
+                        disabled={actionLoading}
+                      />
+                      <CyberInput
+                        variant="cyan"
+                        label="EVENT DATE"
+                        placeholder="e.g. 2026-11-20"
+                        value={newEventDate}
+                        onChange={(e) => setNewEventDate(e.target.value)}
+                        disabled={actionLoading}
+                      />
+                      <CyberInput
+                        variant="cyan"
+                        label="EVENT LOGO (URL / PATH)"
+                        placeholder="e.g. /logos/event-logo.svg"
+                        value={newEventLogo}
+                        onChange={(e) => setNewEventLogo(e.target.value)}
+                        disabled={actionLoading}
+                      />
+                      <CyberInput
+                        variant="cyan"
+                        label="ORGANIZER LOGO (URL / PATH)"
+                        placeholder="e.g. /logos/organizer-logo.svg"
+                        value={newEventOrgLogo}
+                        onChange={(e) => setNewEventOrgLogo(e.target.value)}
+                        disabled={actionLoading}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-end gap-3 border-t border-cyber-cyan/20 pt-4 mt-2">
+                      <CyberButton
+                        type="button"
+                        variant="magenta"
+                        size="md"
+                        onClick={() => setIsCreateEventModalOpen(false)}
+                        disabled={actionLoading}
+                      >
+                        CANCEL
+                      </CyberButton>
+                      <CyberButton
+                        type="submit"
+                        variant="cyan"
+                        size="md"
+                        disabled={actionLoading}
+                        className="flex items-center gap-2"
+                      >
+                        <PlusCircle className="w-4 h-4" /> {actionLoading ? "CREATING..." : "CREATE EVENT"}
+                      </CyberButton>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
