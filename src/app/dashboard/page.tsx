@@ -4,7 +4,6 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { 
   LogOut, 
-  Clock, 
   Lock, 
   ShieldCheck, 
   AlertTriangle,
@@ -28,8 +27,6 @@ import {
 import { Team, ScoringCriteria, ScoreRecord, Judge, EventItem } from "@/lib/types";
 import { useRealtimeSync } from "@/lib/useRealtimeSync";
 import CyberButton from "@/components/CyberButton";
-import Timer from "@/components/Timer";
-import RulesPanel from "@/components/RulesPanel";
 
 export default function JudgeDashboardPage() {
   const router = useRouter();
@@ -48,7 +45,6 @@ export default function JudgeDashboardPage() {
   const [scores, setScores] = useState<ScoreRecord[]>([]);
   const [announceResults, setAnnounceResults] = useState(false);
   const [judgingOpen, setJudgingOpen] = useState(true);
-  const [timerDuration, setTimerDuration] = useState(300);
   
   // Interactive UI State
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
@@ -102,7 +98,6 @@ export default function JudgeDashboardPage() {
       setCriteria(config?.criteriaList || []);
       setAnnounceResults(Boolean(config?.announceResults));
       setJudgingOpen(config?.judgingOpen !== false);
-      setTimerDuration(config?.timerDuration || 300);
       
       // Auto-select team on initial load or if current team belongs to different event
       if (allTeams && allTeams.length > 0) {
@@ -385,7 +380,7 @@ export default function JudgeDashboardPage() {
     return (
       <div className="min-h-screen bg-cyber-bg flex justify-center items-center font-mono text-cyber-cyan p-4">
         <div className="flex flex-col items-center gap-3">
-          <Clock className="w-10 h-10 animate-spin text-cyber-cyan" />
+          <RefreshCw className="w-10 h-10 animate-spin text-cyber-cyan" />
           <p className="font-orbitron tracking-widest text-sm uppercase text-center">LOADING SECURE JURY ENVIRONMENT...</p>
         </div>
       </div>
@@ -569,14 +564,6 @@ export default function JudgeDashboardPage() {
                 })
               )}
             </div>
-          </div>
-
-          {/* Time Countdown clock */}
-          <Timer duration={timerDuration} />
-
-          {/* Compliance Rules Panel */}
-          <div className="hidden lg:block">
-            <RulesPanel />
           </div>
         </section>
 
@@ -790,11 +777,6 @@ export default function JudgeDashboardPage() {
               </p>
             </div>
           )}
-
-          {/* Compliance Rules Panel visible on mobile at bottom */}
-          <div className="block lg:hidden">
-            <RulesPanel />
-          </div>
         </section>
 
       </main>

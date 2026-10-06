@@ -12,7 +12,6 @@ import {
   Grid, 
   ListFilter, 
   Download, 
-  Clock, 
   AlertOctagon, 
   KeyRound,
   FileSpreadsheet,
@@ -34,7 +33,6 @@ import {
   toggleDisqualifyTeam, 
   updateCriteria, 
   toggleAnnounceResults,
-  updateTimerDuration,
   resetDatabase,
   initDatabase,
   getEvents,
@@ -66,11 +64,6 @@ export default function AdminConsolePage() {
   const [announceResults, setAnnounceResults] = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   
-  // Timer State with dirty flag to prevent background poll clobbering
-  const [timerMinutes, setTimerMinutes] = useState(5);
-  const [timerInputStr, setTimerInputStr] = useState("5");
-  const isTimerDirtyRef = useRef(false);
-
   // UI Tabs: 'overview' | 'events' | 'judges' | 'teams' | 'criteria' | 'matrix' | 'leaderboard' | 'system'
   const [activeTab, setActiveTab] = useState("overview");
 
@@ -89,7 +82,6 @@ export default function AdminConsolePage() {
   const [newEventLogo, setNewEventLogo] = useState("");
   const [newEventOrgLogo, setNewEventOrgLogo] = useState("");
   const [newEventDate, setNewEventDate] = useState("");
-  const [newEventTimer, setNewEventTimer] = useState("5");
 
   // Selected Event Editing state
   const [editEventName, setEditEventName] = useState("");
@@ -159,13 +151,6 @@ export default function AdminConsolePage() {
       setAnnounceResults(Boolean(config?.announceResults));
       setLeaderboard(lList || []);
 
-      const serverMins = Math.round((config?.timerDuration || 300) / 60);
-      setTimerMinutes(serverMins);
-      // Only sync input value if user is not actively editing it
-      if (!isTimerDirtyRef.current) {
-        setTimerInputStr(String(serverMins));
-      }
-
       isInitialLoadRef.current = false;
     } catch (err) {
       console.error("Transmission breakdown:", err);
@@ -192,46 +177,7 @@ export default function AdminConsolePage() {
   const handleEventSwitch = (newId: string) => {
     setSelectedEventId(newId);
     selectedEventIdRef.current = newId;
-    isTimerDirtyRef.current = false;
     fetchDbData(newId, false);
-  };
-
-  // ==============================================================
-  // TIMER HANDLERS (REQUIREMENT 3 FIX)
-  // ==============================================================
-  const handleTimerInputChange = (val: string) => {
-    isTimerDirtyRef.current = true;
-    setTimerInputStr(val);
-  };
-
-  const handleTimerPreset = (mins: number) => {
-    isTimerDirtyRef.current = true;
-    setTimerInputStr(String(mins));
-  };
-
-  const handleSaveTimer = async () => {
-    const mins = parseInt(timerInputStr.trim(), 10);
-    if (isNaN(mins) || mins < 1 || mins > 60) {
-      alert("FAIL: PRESENTATION TIME LIMIT MUST BE AN INTEGER BETWEEN 1 AND 60 MINUTES.");
-      return;
-    }
-
-    setActionLoading(true);
-    try {
-      const res = await updateTimerDuration(mins * 60, selectedEventId);
-      if (!res.success) {
-        alert(`FAIL: TIMER SETTING TRANSMISSION FAILURE.\n\n${res.error}`);
-        return;
-      }
-      setTimerMinutes(mins);
-      isTimerDirtyRef.current = false;
-      alert(`SYSTEM STATUS: TIME LIMIT SET TO ${mins} MINUTES FOR ${currentEvent?.name || "SELECTED EVENT"}.`);
-      await fetchDbData(selectedEventId, false);
-    } catch (err: any) {
-      alert(`FAIL: TIMER SETTING TRANSMISSION FAILURE. (${err?.message || "Database error"})`);
-    } finally {
-      setActionLoading(false);
-    }
   };
 
   // ==============================================================
@@ -269,7 +215,6 @@ export default function AdminConsolePage() {
     if (!newEventName.trim()) return;
     setActionLoading(true);
     try {
-      const mins = parseInt(newEventTimer, 10) || 5;
       const res = await createEvent({
         name: newEventName.trim(),
         subtitle: newEventSubtitle.trim(),
@@ -278,7 +223,6 @@ export default function AdminConsolePage() {
         organizerLogo: newEventOrgLogo.trim(),
         date: newEventDate.trim(),
         status: "active",
-        timerDuration: mins * 60,
       });
 
       if (!res.success || !res.data) {
@@ -718,7 +662,7 @@ export default function AdminConsolePage() {
             { id: "criteria", label: `CRITERIA (${criteria.length})`, icon: ListFilter },
             { id: "matrix", label: "MATRIX SPREADSHEET", icon: FileSpreadsheet },
             { id: "leaderboard", label: "LEADERBOARD", icon: Trophy },
-            { id: "system", label: "SYSTEM & TIMER", icon: Settings },
+            { id: "system", label: "BROADCAST SYSTEM", icon: Settings },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -762,11 +706,11 @@ export default function AdminConsolePage() {
             </div>
 
             <div className="cyber-glass border border-cyber-magenta/20 p-5 flex flex-col gap-1">
-              <span className="text-[10px] font-mono text-gray-400 uppercase">PRESENTATION LIMIT</span>
+              <span className="text-[10px] font-mono text-gray-400 uppercase">JURISTS ASSIGNED</span>
               <span className="font-orbitron font-extrabold text-2xl text-cyber-cyan">
-                {timerMinutes} MIN
+                {judges.length}
               </span>
-              <span className="text-[9px] font-mono text-gray-500">{timerMinutes * 60} SECONDS</span>
+              <span className="text-[9px] font-mono text-gray-500">ACTIVE IN THIS EVENT</span>
             </div>
 
             <div className="cyber-glass border border-cyber-magenta/20 p-5 flex flex-col gap-1">
@@ -916,16 +860,6 @@ export default function AdminConsolePage() {
                   onChange={(e) => setNewEventDate(e.target.value)}
                   disabled={actionLoading}
                 />
-                <CyberInput
-                  variant="magenta"
-                  label="TIME LIMIT (MINUTES)"
-                  type="number"
-                  min="1"
-                  max="60"
-                  value={newEventTimer}
-                  onChange={(e) => setNewEventTimer(e.target.value)}
-                  disabled={actionLoading}
-                />
 
                 <div className="flex items-end">
                   <CyberButton type="submit" variant="magenta" fullWidth disabled={actionLoading}>
@@ -972,8 +906,6 @@ export default function AdminConsolePage() {
                           {ev.organizer && <p className="text-[10px] text-cyber-cyan font-mono mt-0.5">By {ev.organizer}</p>}
                           <div className="flex items-center gap-2 mt-1 text-[10px] text-gray-500 font-mono flex-wrap">
                             <span>ID: {ev.id}</span>
-                            <span>•</span>
-                            <span>Timer: {Math.round(ev.timerDuration / 60)}m</span>
                             {ev.date && (
                               <>
                                 <span>•</span>
@@ -1394,100 +1326,10 @@ export default function AdminConsolePage() {
         )}
 
         {/* ============================================================== */}
-        {/* TAB 8: SYSTEM SETTINGS & PRESENTATION TIMER (REQUIREMENT 3)    */}
+        {/* TAB 8: BROADCAST SYSTEM & SCORES MANAGEMENT                    */}
         {/* ============================================================== */}
         {activeTab === "system" && (
           <div className="flex flex-col gap-6">
-            {/* PRESENTATION TIMER CARD (REQUIREMENT 3 FIX) */}
-            <div className="cyber-glass border border-cyber-magenta/20 p-6 flex flex-col gap-5">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-cyber-magenta/15 pb-3">
-                <div className="flex items-center gap-2">
-                  <Clock className="w-5 h-5 text-cyber-magenta" />
-                  <div>
-                    <h2 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase">
-                      ⏲️ PRESENTATION TIME LIMIT CONFIGURATION
-                    </h2>
-                    <p className="text-xs text-gray-400 font-mono mt-0.5">
-                      Sets presentation clock for all judges evaluating {currentEvent?.name || "this event"}.
-                    </p>
-                  </div>
-                </div>
-
-                <CyberButton
-                  variant="magenta"
-                  size="md"
-                  onClick={handleSaveTimer}
-                  disabled={actionLoading}
-                  className="flex items-center gap-1.5 shrink-0"
-                >
-                  <Save className="w-4 h-4" /> SAVE TIME LIMIT
-                </CyberButton>
-              </div>
-
-              {/* Status Indicator */}
-              <div className="bg-cyber-magenta/5 border border-cyber-magenta/20 p-3.5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 font-mono text-xs">
-                <span className="text-gray-300">
-                  CURRENT CONFIGURED DURATION: <strong className="text-cyber-magenta font-bold">{timerMinutes} MINUTES ({timerMinutes * 60} SECONDS)</strong>
-                </span>
-                <span className="text-[10px] text-gray-500">
-                  EVENT: {selectedEventId}
-                </span>
-              </div>
-
-              {/* Quick Preset Buttons */}
-              <div className="flex flex-col gap-1.5">
-                <label className="font-orbitron text-xs font-semibold text-gray-300 uppercase">
-                  QUICK PRESETS (MINUTES):
-                </label>
-                <div className="flex gap-2 flex-wrap">
-                  {[2, 3, 5, 7, 8, 10, 15].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => handleTimerPreset(preset)}
-                      className={`px-3 py-1.5 font-mono text-xs border transition-all cursor-pointer ${
-                        parseInt(timerInputStr, 10) === preset
-                          ? "border-cyber-magenta bg-cyber-magenta/20 text-white font-bold shadow-[0_0_8px_rgba(217,70,239,0.3)]"
-                          : "border-gray-800 bg-cyber-bg-darker hover:border-gray-600 text-gray-400"
-                      }`}
-                    >
-                      {preset} MIN
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Minute Input Field */}
-              <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end bg-cyber-bg-darker/60 p-4 border border-cyber-magenta/10">
-                <div className="flex-grow w-full sm:w-auto">
-                  <label htmlFor="timer-limit-input" className="font-orbitron text-xs font-semibold text-cyber-magenta tracking-widest uppercase block mb-1">
-                    TIME LIMIT (1–60 WHOLE MINUTES)
-                  </label>
-                  <input
-                    id="timer-limit-input"
-                    type="number"
-                    min="1"
-                    max="60"
-                    step="1"
-                    value={timerInputStr}
-                    onChange={(e) => handleTimerInputChange(e.target.value)}
-                    disabled={actionLoading}
-                    className="w-full bg-cyber-bg-darker/90 text-white font-mono text-base px-4 py-2 border border-cyber-magenta/40 focus:border-cyber-magenta outline-none"
-                  />
-                </div>
-
-                <CyberButton
-                  variant="magenta"
-                  size="md"
-                  onClick={handleSaveTimer}
-                  disabled={actionLoading}
-                  className="w-full sm:w-auto shrink-0"
-                >
-                  SET TO {parseInt(timerInputStr, 10) || 5} MIN
-                </CyberButton>
-              </div>
-            </div>
-
             {/* Broadcast Switcher card */}
             <div className="cyber-glass border border-cyber-magenta/20 p-6 flex flex-col gap-4">
               <div className="flex items-center gap-2 border-b border-cyber-magenta/15 pb-2.5">
