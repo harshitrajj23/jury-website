@@ -96,7 +96,7 @@ export default function LeaderboardPage() {
   const realtimeStatus = useRealtimeSync({
     tables: ["Score", "Settings", "Team"],
     onDataChange: handleRealtimeChange,
-    intervalMs: 3500,
+    intervalMs: 20000,
   });
 
 

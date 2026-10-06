@@ -150,9 +150,13 @@ npm install
 Create `.env.local`
 
 ```env
-DATABASE_URL=your_neon_database_url
-NEXTAUTH_SECRET=your_generated_secret
+# Development:
 NEXTAUTH_URL=http://localhost:3000
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+
+# Production (Vercel):
+# NEXTAUTH_URL=https://jury-website.vercel.app
+# NEXT_PUBLIC_APP_URL=https://jury-website.vercel.app
 ```
 
 Generate secret:
@@ -166,7 +170,7 @@ Example:
 ```env
 DATABASE_URL=postgresql://user:password@ep-xxxx.neon.tech/neondb?sslmode=require
 NEXTAUTH_SECRET=your-secret-key
-NEXTAUTH_URL=http://localhost:3000
+NEXT_PUBLIC_APP_URL=https://jury-website.vercel.app
 ```
 
 ---

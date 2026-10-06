@@ -4,21 +4,18 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { 
   LogOut, 
-  User, 
-  CheckCircle, 
   Clock, 
   Lock, 
   ShieldCheck, 
-  Save, 
   AlertTriangle,
-  RotateCcw,
   Sparkles,
-  Wifi,
-  WifiOff
+  CheckCircle2,
+  XCircle,
+  AlertOctagon
 } from "lucide-react";
 import { 
   getTeams, 
-  getScores, 
+  getJudgeScores, 
   getConfig, 
   submitScores, 
   initDatabase
@@ -26,7 +23,6 @@ import {
 import { Team, ScoringCriteria, ScoreRecord, Judge } from "@/lib/types";
 import { useRealtimeSync } from "@/lib/useRealtimeSync";
 import CyberButton from "@/components/CyberButton";
-import CyberInput from "@/components/CyberInput";
 import Timer from "@/components/Timer";
 import RulesPanel from "@/components/RulesPanel";
 
@@ -41,46 +37,55 @@ export default function JudgeDashboardPage() {
   const [criteria, setCriteria] = useState<ScoringCriteria[]>([]);
   const [scores, setScores] = useState<ScoreRecord[]>([]);
   const [announceResults, setAnnounceResults] = useState(false);
+  const [judgingOpen, setJudgingOpen] = useState(true);
   const [timerDuration, setTimerDuration] = useState(480);
   
   // Interactive UI State
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [evaluationScores, setEvaluationScores] = useState<Record<string, number>>({});
-  const [showSignOffModal, setShowSignOffModal] = useState(false);
-  const [signOffName, setSignOffName] = useState("");
-  const [signOffDesignation, setSignOffDesignation] = useState("");
-  const [signOffDate, setSignOffDate] = useState("");
+  
+  // Feedback Toasts
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
   
   // UX States
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const isInitialLoadRef = useRef(true);
   const selectedTeamRef = useRef<Team | null>(null);
+  const isSubmittingRef = useRef(false);
 
   useEffect(() => {
     selectedTeamRef.current = selectedTeam;
   }, [selectedTeam]);
+
+  const showFeedback = (type: "success" | "error", message: string) => {
+    setFeedback({ type, message });
+    setTimeout(() => {
+      setFeedback((prev) => (prev?.message === message ? null : prev));
+    }, 5000);
+  };
   
   const fetchData = async (judgeId: string, isBackground = false) => {
     if (!isBackground && isInitialLoadRef.current) {
       setLoading(true);
     }
     try {
-      const [allTeams, allScores, config] = await Promise.all([
+      const [allTeams, judgeScores, config] = await Promise.all([
         getTeams(),
-        getScores(),
+        getJudgeScores(judgeId),
         getConfig(),
       ]);
       
       setTeams(allTeams || []);
-      setScores(allScores || []);
+      setScores(judgeScores || []);
       setCriteria(config?.criteriaList || []);
       setAnnounceResults(Boolean(config?.announceResults));
+      setJudgingOpen(config?.judgingOpen !== false);
       setTimerDuration(config?.timerDuration || 480);
       
-      // Auto-select first team ONLY on initial load if none selected yet
+      // Auto-select first active team on initial load if none selected yet
       if (!selectedTeamRef.current && allTeams && allTeams.length > 0) {
-        handleSelectTeam(allTeams[0], allScores || [], config?.criteriaList || [], judgeId);
+        handleSelectTeam(allTeams[0], judgeScores || [], config?.criteriaList || [], judgeId);
       }
       isInitialLoadRef.current = false;
     } catch (err) {
@@ -91,7 +96,6 @@ export default function JudgeDashboardPage() {
   };
 
   // Route security & mount initializers
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     initDatabase();
     
@@ -101,22 +105,16 @@ export default function JudgeDashboardPage() {
       return;
     }
     
-    const parsedJudge = JSON.parse(session) as Judge;
-    
-    Promise.resolve().then(() => {
+    try {
+      const parsedJudge = JSON.parse(session) as Judge;
       setJudge(parsedJudge);
-      setSignOffName(parsedJudge.name);
-      setSignOffDesignation(parsedJudge.designation);
-      
-      const today = new Date().toISOString().split("T")[0];
-      setSignOffDate(today);
-    });
-    
-    fetchData(parsedJudge.id, false);
+      fetchData(parsedJudge.id, false);
+    } catch (e) {
+      router.push("/");
+    }
   }, [router]);
 
   // Realtime WebSocket sync — auto-refresh silently when DB changes
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const handleRealtimeChange = useCallback(() => {
     if (judge) {
       fetchData(judge.id, true);
@@ -127,7 +125,7 @@ export default function JudgeDashboardPage() {
     tables: ["Score", "Team", "Settings", "Criteria"],
     onDataChange: handleRealtimeChange,
     enabled: !!judge,
-    intervalMs: 3500,
+    intervalMs: 20000,
   });
 
   const handleSelectTeam = (
@@ -156,8 +154,8 @@ export default function JudgeDashboardPage() {
   };
 
   const handleScoreChange = (criteriaId: string, val: number) => {
-    // Keep between 1 and 10
-    const clamped = Math.max(1, Math.min(10, val));
+    // Keep strictly between 1 and 10
+    const clamped = Math.max(1, Math.min(10, Math.round(val)));
     setEvaluationScores((prev) => ({
       ...prev,
       [criteriaId]: clamped,
@@ -175,15 +173,37 @@ export default function JudgeDashboardPage() {
     : null;
 
   const isCurrentTeamLocked = !!currentRecord;
+  const isTeamDisqualified = selectedTeam?.name.startsWith("[DISQUALIFIED]");
 
   // Calculate live sum
   const calculateTotal = () => {
-    return Object.values(evaluationScores).reduce((sum, score) => sum + score, 0);
+    return Object.values(evaluationScores).reduce((sum, score) => sum + (Number(score) || 0), 0);
   };
 
+  // Submit evaluation with multi-click protection & atomic batch execution
   const handleFinalSubmit = async () => {
-    if (!selectedTeam || !judge) return;
+    if (!selectedTeam || !judge || isSubmittingRef.current || actionLoading) return;
     
+    if (!judgingOpen) {
+      showFeedback("error", "JUDGING_LOCKED: Judging is currently paused by the administrator.");
+      return;
+    }
+
+    if (isTeamDisqualified) {
+      showFeedback("error", "EVALUATION_DENIED: Disqualified teams cannot receive scores.");
+      return;
+    }
+
+    // Validate all active criteria are scored
+    for (const c of criteria) {
+      const val = evaluationScores[c.id];
+      if (val === undefined || val === null || val < 1 || val > 10) {
+        showFeedback("error", `VALIDATION_ERROR: Missing valid score (1-10) for "${c.name}".`);
+        return;
+      }
+    }
+
+    isSubmittingRef.current = true;
     setActionLoading(true);
     
     const record: ScoreRecord = {
@@ -202,17 +222,19 @@ export default function JudgeDashboardPage() {
     try {
       const res = await submitScores(record);
       if (!res.success) {
-        alert(`FAIL: TRANSMISSION TIMEOUT / REJECTED.\n\n${res.error}`);
+        showFeedback("error", res.error || "TRANSMISSION_ERROR: Score submission rejected.");
         return;
       }
       
-      // Re-fetch scores to update locked state
-      const updatedScores = await getScores();
+      // Re-fetch scoped scores to update locked state immediately
+      const updatedScores = await getJudgeScores(judge.id);
       setScores(updatedScores);
+      showFeedback("success", `✅ EVALUATION ENCRYPTED & SUBMITTED FOR ${selectedTeam.name.toUpperCase()}`);
     } catch (err: any) {
-      alert(`FAIL: TRANSMISSION TIMEOUT. (${err?.message || "Database error"})`);
+      showFeedback("error", `FAIL: TRANSMISSION TIMEOUT (${err?.message || "Database error"})`);
     } finally {
       setActionLoading(false);
+      isSubmittingRef.current = false;
     }
   };
 
@@ -220,6 +242,8 @@ export default function JudgeDashboardPage() {
   const isTeamCompleted = (teamId: string) => {
     return scores.some((s) => s.teamId === teamId && s.judgeId === judge?.id);
   };
+
+  const completedCount = teams.filter((t) => isTeamCompleted(t.id)).length;
 
   if (loading || !judge) {
     return (
@@ -248,15 +272,13 @@ export default function JudgeDashboardPage() {
               <div className="flex items-center gap-2 mt-0.5">
                 <span className={`w-1.5 h-1.5 rounded-full ${realtimeStatus === "connected" ? "bg-cyber-green animate-ping" : realtimeStatus === "connecting" ? "bg-cyber-yellow animate-pulse" : "bg-cyber-red"}`} />
                 <span className="font-mono text-[9px] text-cyber-cyan tracking-wider">
-                  {realtimeStatus === "connected" ? "⚡ LIVE" : realtimeStatus === "connecting" ? "SYNCING" : "OFFLINE"} • JUDGE: {judge.name.toUpperCase()} ({judge.designation.toUpperCase()})
+                  {realtimeStatus === "connected" ? "⚡ LIVE" : realtimeStatus === "connecting" ? "SYNCING" : "OFFLINE"} • JUDGE: {judge.name.toUpperCase()} ({judge.designation.toUpperCase()}) • [{completedCount}/{teams.length} EVALUATED]
                 </span>
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-3 flex-wrap">
-
-
             <CyberButton
               variant="red"
               size="sm"
@@ -269,15 +291,44 @@ export default function JudgeDashboardPage() {
         </div>
       </header>
 
+      {/* Floating Feedback Banner */}
+      {feedback && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 mt-4 w-full">
+          <div className={`p-3.5 font-mono text-xs flex items-center gap-3 border shadow-lg transition-all duration-300 ${
+            feedback.type === "success"
+              ? "bg-cyber-green/15 border-cyber-green/40 text-cyber-green"
+              : "bg-cyber-red/15 border-cyber-red/40 text-cyber-red"
+          }`}>
+            {feedback.type === "success" ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <XCircle className="w-4 h-4 shrink-0" />}
+            <span className="font-bold">{feedback.message}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Judging Paused Notice */}
+      {!judgingOpen && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 mt-4 w-full">
+          <div className="p-3 bg-cyber-yellow/15 border border-cyber-yellow/40 text-cyber-yellow font-mono text-xs flex items-center gap-3">
+            <AlertOctagon className="w-4 h-4 shrink-0 animate-pulse" />
+            <span>⚡ NOTICE: Judging evaluation is currently paused by master control. Submissions are temporarily frozen.</span>
+          </div>
+        </div>
+      )}
+
       {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 mt-8 flex-grow grid grid-cols-1 lg:grid-cols-12 gap-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 mt-6 flex-grow grid grid-cols-1 lg:grid-cols-12 gap-8">
         
         {/* Left Side: Sidebar team selectors (Col 1-3) */}
         <section className="lg:col-span-3 flex flex-col gap-6">
           <div className="cyber-glass border border-cyber-cyan/15 p-4 flex flex-col gap-4">
-            <h3 className="font-orbitron text-xs font-bold text-cyber-cyan tracking-wider uppercase border-b border-cyber-cyan/15 pb-2">
-              📂 HACKATHON TEAMS ({teams.length})
-            </h3>
+            <div className="flex justify-between items-center border-b border-cyber-cyan/15 pb-2">
+              <h3 className="font-orbitron text-xs font-bold text-cyber-cyan tracking-wider uppercase">
+                📂 TEAMS ({teams.length})
+              </h3>
+              <span className="font-mono text-[9px] text-gray-400">
+                {completedCount}/{teams.length} DONE
+              </span>
+            </div>
             
             <div className="flex flex-col gap-2 max-h-[450px] overflow-y-auto pr-1">
               {teams.length === 0 ? (
@@ -286,6 +337,7 @@ export default function JudgeDashboardPage() {
                 teams.map((t) => {
                   const completed = isTeamCompleted(t.id);
                   const selected = selectedTeam?.id === t.id;
+                  const isDq = t.name.startsWith("[DISQUALIFIED]");
                   
                   return (
                     <button
@@ -299,7 +351,9 @@ export default function JudgeDashboardPage() {
                         }
                       `}
                     >
-                      <span className="truncate pr-2 font-medium">{t.name}</span>
+                      <span className={`truncate pr-2 font-medium ${isDq ? "line-through text-cyber-red" : ""}`}>
+                        {t.name}
+                      </span>
                       {completed ? (
                         <span className="flex items-center gap-1 text-[10px] text-cyber-green bg-cyber-green/10 px-1.5 py-0.5 uppercase font-bold shrink-0">
                           <Lock className="w-2.5 h-2.5" /> LOCKED
@@ -318,6 +372,9 @@ export default function JudgeDashboardPage() {
 
           {/* Time Countdown clock */}
           <Timer duration={timerDuration} />
+
+          {/* Compliance Rules Panel */}
+          <RulesPanel />
         </section>
 
         {/* Center: Dynamic Evaluator Sheet (Col 4-12) */}
@@ -357,7 +414,22 @@ export default function JudgeDashboardPage() {
                     </span>
                     <p className="text-[11px] text-gray-400">
                       Scores locked as read-only on database at {new Date(currentRecord.submittedAt).toLocaleTimeString()}.
-                      Sign-off verified under: {currentRecord.judgeSignOff?.name || "Jurist"} ({currentRecord.judgeSignOff?.designation || "Judge"})
+                      Sign-off verified under: {currentRecord.judgeSignOff?.name || judge.name} ({currentRecord.judgeSignOff?.designation || judge.designation})
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Disqualified Warning */}
+              {isTeamDisqualified && (
+                <div className="bg-cyber-red/15 border border-cyber-red/30 p-3 flex items-start gap-3">
+                  <AlertOctagon className="w-5 h-5 text-cyber-red mt-0.5 shrink-0" />
+                  <div className="flex flex-col gap-0.5 font-mono text-xs">
+                    <span className="text-cyber-red font-bold uppercase tracking-wider">
+                      ⚠️ TEAM DISQUALIFIED
+                    </span>
+                    <p className="text-[11px] text-gray-400">
+                      This team has been disqualified from judging and will not be calculated in leaderboard aggregates.
                     </p>
                   </div>
                 </div>
@@ -367,6 +439,7 @@ export default function JudgeDashboardPage() {
               <div className="flex flex-col gap-5 py-2">
                 {criteria.map((c, index) => {
                   const scoreVal = evaluationScores[c.id] || 5;
+                  const isLocked = isCurrentTeamLocked || isTeamDisqualified || !judgingOpen;
                   
                   return (
                     <div 
@@ -380,12 +453,18 @@ export default function JudgeDashboardPage() {
                       `}
                     >
                       <div className="flex justify-between items-center mb-2">
-                        <span className="font-orbitron text-xs font-bold tracking-wider text-gray-200 uppercase">
-                          {index + 1}. {c.name}
-                        </span>
+                        <div>
+                          <span className="font-orbitron text-xs font-bold tracking-wider text-gray-200 uppercase">
+                            {index + 1}. {c.name}
+                          </span>
+                          {c.weight && (
+                            <span className="text-[9px] font-mono text-cyber-cyan/60 ml-2">
+                              (Weight: {c.weight})
+                            </span>
+                          )}
+                        </div>
                         
                         <div className="flex items-center gap-1.5">
-                          {/* Range value controller */}
                           <span className={`w-7 h-7 flex items-center justify-center font-mono text-xs font-bold border ${isCurrentTeamLocked ? "border-gray-700 text-cyber-green" : "border-cyber-cyan/30 text-cyber-cyan"}`}>
                             {scoreVal}
                           </span>
@@ -399,14 +478,14 @@ export default function JudgeDashboardPage() {
                           max="10"
                           value={scoreVal}
                           onChange={(e) => handleScoreChange(c.id, parseInt(e.target.value))}
-                          disabled={isCurrentTeamLocked}
+                          disabled={isLocked}
                           className="flex-grow accent-cyber-cyan cursor-pointer disabled:cursor-not-allowed disabled:accent-cyber-green"
                         />
                         <div className="flex gap-1">
                           {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
                             <button
                               key={num}
-                              disabled={isCurrentTeamLocked}
+                              disabled={isLocked}
                               onClick={() => handleScoreChange(c.id, num)}
                               className={`
                                 w-4 h-4 font-mono text-[9px] flex items-center justify-center transition-all duration-200 border
@@ -430,7 +509,7 @@ export default function JudgeDashboardPage() {
               </div>
 
               {/* Action Buttons */}
-              {!isCurrentTeamLocked && (
+              {!isCurrentTeamLocked && !isTeamDisqualified && (
                 <div className="border-t border-cyber-cyan/15 pt-4 mt-2 flex justify-between items-center gap-4">
                   <p className="text-[10px] font-mono text-gray-500 uppercase leading-snug">
                     ⚡ ALL METRICS ARE FINAL ON SUBMISSION.
@@ -439,10 +518,10 @@ export default function JudgeDashboardPage() {
                     variant="cyan"
                     size="md"
                     onClick={handleFinalSubmit}
-                    disabled={actionLoading}
+                    disabled={actionLoading || !judgingOpen}
                     className="flex items-center gap-1.5 shrink-0"
                   >
-                    <ShieldCheck className="w-4 h-4" /> {actionLoading ? "SYNCING..." : "SUBMIT"}
+                    <ShieldCheck className="w-4 h-4" /> {actionLoading ? "SUBMITTING..." : "SUBMIT EVALUATION"}
                   </CyberButton>
                 </div>
               )}
@@ -456,8 +535,6 @@ export default function JudgeDashboardPage() {
             </div>
           )}
         </section>
-
-
 
       </main>
     </div>
