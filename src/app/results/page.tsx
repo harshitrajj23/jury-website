@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import confetti from "canvas-confetti";
 import { 
   Trophy, 
@@ -10,12 +10,18 @@ import {
   Radio, 
   RefreshCw, 
   Cpu, 
-  Layers
+  Layers,
+  Sparkles,
+  ChevronRight,
+  Flame,
+  Award
 } from "lucide-react";
-import { getLeaderboard, getConfig, initDatabase, getEvents } from "@/lib/db";
+import { getPublicResults, initDatabase, getEvents } from "@/lib/db";
 import type { LeaderboardEntry, EventItem } from "@/lib/types";
 import { useRealtimeSync } from "@/lib/useRealtimeSync";
 import CyberButton from "@/components/CyberButton";
+
+type RevealStage = "NOT_STARTED" | "STAGE_3RD" | "STAGE_2ND" | "STAGE_WINNER" | "FULL_RESULTS";
 
 function LeaderboardContent() {
   const searchParams = useSearchParams();
@@ -30,6 +36,7 @@ function LeaderboardContent() {
   const [announced, setAnnounced] = useState(false);
   const [resultsDeclared, setResultsDeclared] = useState(false);
   const [declaredAt, setDeclaredAt] = useState<string | undefined>(undefined);
+  const [revealStage, setRevealStage] = useState<RevealStage>("NOT_STARTED");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [expandedTeams, setExpandedTeams] = useState<Record<string, boolean>>({});
@@ -38,6 +45,8 @@ function LeaderboardContent() {
   useEffect(() => {
     if (paramEventId && paramEventId !== selectedEventId) {
       setSelectedEventId(paramEventId);
+      setRevealStage("NOT_STARTED");
+      confettiTriggeredRef.current = false;
     }
   }, [paramEventId, selectedEventId]);
 
@@ -51,21 +60,20 @@ function LeaderboardContent() {
   const fetchLeaderboard = useCallback(async (eventId: string = selectedEventId) => {
     setRefreshing(true);
     try {
-      const [eventsList, config, data] = await Promise.all([
+      const [eventsList, publicRes] = await Promise.all([
         getEvents(),
-        getConfig(eventId),
-        getLeaderboard(eventId),
+        getPublicResults(eventId),
       ]);
 
       setEvents(eventsList || []);
-      const matched = eventsList.find((e) => e.id === eventId) || config.event || null;
+      const matched = eventsList.find((e) => e.id === eventId) || publicRes.event || null;
       setCurrentEvent(matched);
 
-      setAnnounced(config.announceResults);
-      setResultsDeclared(Boolean(config.resultsDeclared || matched?.resultsDeclared));
-      setDeclaredAt(config.declaredAt || matched?.declaredAt);
-      if (config.announceResults) {
-        setLeaderboard(data || []);
+      setAnnounced(publicRes.published);
+      setResultsDeclared(publicRes.published);
+      setDeclaredAt(publicRes.publishedAt);
+      if (publicRes.published) {
+        setLeaderboard(publicRes.leaderboard || []);
       } else {
         setLeaderboard([]);
       }
@@ -84,42 +92,11 @@ function LeaderboardContent() {
 
   const handleEventChange = (newEvId: string) => {
     setSelectedEventId(newEvId);
+    setRevealStage("NOT_STARTED");
     confettiTriggeredRef.current = false;
     router.push(`/results?event=${newEvId}`);
     fetchLeaderboard(newEvId);
   };
-
-  useEffect(() => {
-    if (announced && leaderboard.length > 0 && !confettiTriggeredRef.current) {
-      confettiTriggeredRef.current = true;
-      const duration = 4 * 1000;
-      const end = Date.now() + duration;
-
-      const frame = () => {
-        confetti({
-          particleCount: 5,
-          angle: 60,
-          spread: 55,
-          origin: { x: 0 },
-          colors: ["#eab308", "#06b6d4", "#d946ef", "#ffffff"]
-        });
-        confetti({
-          particleCount: 5,
-          angle: 120,
-          spread: 55,
-          origin: { x: 1 },
-          colors: ["#eab308", "#06b6d4", "#d946ef", "#ffffff"]
-        });
-
-        if (Date.now() < end) {
-          requestAnimationFrame(frame);
-        }
-      };
-      
-      // Delay the confetti until the 1st place team is revealed (3.5s)
-      setTimeout(frame, 3500);
-    }
-  }, [announced, leaderboard.length]);
 
   // Realtime WebSocket sync scoped to event
   const handleRealtimeChange = useCallback(() => {
@@ -144,29 +121,32 @@ function LeaderboardContent() {
     );
   }
 
-  // IF BLOCKED / ENCRYPTED
+  // IF UNPUBLISHED (Requirement 18 & 20)
   if (!announced) {
     return (
       <div className="min-h-screen flex flex-col justify-center items-center p-4 relative font-mono overflow-x-hidden">
-        <div className="absolute w-[250px] h-[250px] bg-cyber-red/5 rounded-full blur-[90px] top-[20%] left-[30%] pointer-events-none" />
+        <div className="absolute w-[300px] h-[300px] bg-cyber-red/5 rounded-full blur-[100px] top-[20%] left-[30%] pointer-events-none" />
         
-        <div className="w-full max-w-lg cyber-glass border border-cyber-red/25 p-6 sm:p-8 relative flex flex-col items-center text-center gap-6">
+        <div className="w-full max-w-lg cyber-glass border border-cyber-red/30 p-8 relative flex flex-col items-center text-center gap-6 shadow-[0_0_40px_rgba(239,68,68,0.15)]">
           <span className="absolute top-0 left-0 w-2.5 h-2.5 bg-cyber-red" />
           <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-cyber-red" />
           
-          <div className="p-4 bg-cyber-red/10 border border-cyber-red/30 rounded-none animate-pulse">
+          <div className="p-4 bg-cyber-red/10 border border-cyber-red/40 animate-pulse">
             <Lock className="w-8 h-8 text-cyber-red" />
           </div>
 
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-center gap-2 text-cyber-red font-mono text-xs tracking-widest uppercase">
-              <Radio className="w-4 h-4 animate-bounce" /> BROADCAST BLOCKADE IN EFFECT
+              <Radio className="w-4 h-4 animate-bounce" /> OFFICIAL ANNOUNCEMENT PENDING
             </div>
-            <h1 className="font-orbitron font-extrabold text-xl sm:text-2xl text-white tracking-widest text-glow-red mt-2 uppercase">
-              {currentEvent?.name || "TRANSMISSION LOCKED"}
+            <h1 className="font-orbitron font-extrabold text-xl sm:text-2xl text-white tracking-widest uppercase mt-1">
+              RESULTS NOT YET PUBLISHED
             </h1>
-            <p className="text-xs text-gray-500 font-sans leading-relaxed px-2 mt-1">
-              Leaderboard aggregates for {currentEvent?.name || "this event"} are currently encrypted under master organizer lock. The results transmission channel will open instantly upon admin broadcast.
+            <p className="text-sm text-gray-300 font-sans leading-relaxed px-2 mt-1">
+              The final results for {currentEvent?.name || "this event"} have not been released yet.
+            </p>
+            <p className="text-xs text-gray-400 font-mono mt-1">
+              Please check back later.
             </p>
           </div>
 
@@ -192,11 +172,11 @@ function LeaderboardContent() {
             </div>
           )}
 
-          <div className="w-full bg-cyber-bg-darker/60 border border-cyber-red/15 p-4 font-mono text-[10px] text-gray-400 text-left flex flex-col gap-1">
-            <span className="text-cyber-red font-bold uppercase">📟 SEC-STATUS:</span>
+          <div className="w-full bg-cyber-bg-darker/60 border border-cyber-red/20 p-3.5 font-mono text-[10px] text-gray-400 text-left flex flex-col gap-1">
+            <span className="text-cyber-red font-bold uppercase">📟 EVENT STATUS:</span>
             <span>⚡ EVENT: {currentEvent?.name?.toUpperCase() || selectedEventId.toUpperCase()}</span>
-            <span>⚡ BROADCAST FEED: EVENT-RESULTS-PORTAL</span>
-            <span>⚡ REALTIME LINK: {realtimeStatus === "connected" ? "LIVE SSE ACTIVE" : "OFFLINE"}</span>
+            <span>⚡ STATUS: EVALUATION IN PROGRESS • UNPUBLISHED</span>
+            <span>⚡ LINK: {realtimeStatus === "connected" ? "LIVE SSE ACTIVE" : "OFFLINE"}</span>
           </div>
 
           <div className="flex gap-4 w-full justify-center">
@@ -207,13 +187,18 @@ function LeaderboardContent() {
               disabled={refreshing}
               className="flex items-center gap-1.5"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} /> SCAN SIGNAL
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} /> CHECK STATUS
             </CyberButton>
           </div>
         </div>
       </div>
     );
   }
+
+  const rank1Teams = leaderboard.filter((e) => e.rank === 1);
+  const rank2Teams = leaderboard.filter((e) => e.rank === 2);
+  const rank3Teams = leaderboard.filter((e) => e.rank === 3);
+  const hasThirdPlace = rank3Teams.length > 0;
 
   // IF RESULTS ANNOUNCED / DISPLAY LEADERBOARD
   return (
@@ -306,7 +291,7 @@ function LeaderboardContent() {
         </div>
       </header>
 
-      {/* Main Leaderboard Grid */}
+      {/* Main Content: Suspense Reveal or Full Rankings */}
       <main className="max-w-4xl mx-auto px-4 sm:px-6 w-full mt-8 flex-grow flex flex-col gap-6">
         {leaderboard.length === 0 ? (
           <div className="cyber-glass border border-cyber-cyan/15 p-12 text-center flex flex-col items-center justify-center gap-4">
@@ -315,8 +300,320 @@ function LeaderboardContent() {
               TABULATING TRANSMITTED DATA NODES FOR {currentEvent?.name?.toUpperCase() || selectedEventId.toUpperCase()}...
             </p>
           </div>
+        ) : revealStage !== "FULL_RESULTS" ? (
+          /* CINEMATIC STAGED RESULTS REVEAL (Requirements 10-16, 22-23) */
+          <div className="w-full flex flex-col items-center justify-center py-6">
+            <AnimatePresence mode="wait">
+              {revealStage === "NOT_STARTED" && (
+                <motion.div
+                  key="stage_not_started"
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: -20 }}
+                  transition={{ duration: 0.4 }}
+                  className="w-full max-w-xl mx-auto cyber-glass border border-cyber-cyan/40 p-8 sm:p-12 text-center flex flex-col items-center gap-6 relative shadow-[0_0_50px_rgba(6,182,212,0.15)]"
+                >
+                  <span className="absolute top-0 left-0 w-3 h-3 bg-cyber-cyan" />
+                  <span className="absolute bottom-0 right-0 w-3 h-3 bg-cyber-cyan" />
+
+                  <div className="w-20 h-20 rounded-full bg-cyber-cyan/10 border-2 border-cyber-cyan/50 flex items-center justify-center text-cyber-cyan shadow-[0_0_30px_rgba(6,182,212,0.3)] animate-pulse">
+                    <Trophy className="w-10 h-10 text-cyber-cyan" />
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <span className="text-[11px] font-mono tracking-widest text-cyber-cyan uppercase font-bold flex items-center justify-center gap-2">
+                      <Sparkles className="w-3.5 h-3.5" /> OFFICIAL CHAMPIONSHIP TRANSMISSION
+                    </span>
+                    <h2 className="font-orbitron font-extrabold text-2xl sm:text-3xl text-white tracking-widest uppercase">
+                      RESULTS REVEAL
+                    </h2>
+                    <p className="text-gray-300 font-mono text-sm mt-1">
+                      THE FINAL RESULTS ARE IN
+                    </p>
+                    <p className="text-xs text-gray-400 font-sans">
+                      Are you ready to reveal the podium standings for <span className="text-white font-semibold">{currentEvent?.name}</span>?
+                    </p>
+                  </div>
+
+                  <div className="pt-2">
+                    <CyberButton
+                      variant="cyan"
+                      size="lg"
+                      onClick={() => {
+                        if (hasThirdPlace) {
+                          setRevealStage("STAGE_3RD");
+                        } else if (rank2Teams.length > 0) {
+                          setRevealStage("STAGE_2ND");
+                        } else {
+                          setRevealStage("STAGE_WINNER");
+                        }
+                      }}
+                      className="flex items-center gap-2 text-sm tracking-widest font-bold px-8 py-3.5 shadow-[0_0_20px_rgba(6,182,212,0.3)]"
+                    >
+                      <Sparkles className="w-4 h-4" /> BEGIN REVEAL
+                    </CyberButton>
+                  </div>
+                </motion.div>
+              )}
+
+              {revealStage === "STAGE_3RD" && (
+                <motion.div
+                  key="stage_3rd"
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: -20 }}
+                  transition={{ duration: 0.4 }}
+                  className="w-full max-w-xl mx-auto cyber-glass border border-amber-700/50 p-8 sm:p-10 text-center flex flex-col items-center gap-6 relative shadow-[0_0_50px_rgba(180,83,9,0.2)]"
+                >
+                  <span className="absolute top-0 left-0 w-3 h-3 bg-amber-500" />
+                  <span className="absolute bottom-0 right-0 w-3 h-3 bg-amber-500" />
+
+                  <div className="flex items-center gap-2 text-amber-400 font-mono text-xs tracking-widest uppercase font-bold">
+                    STAGE 1 OF 3 • PODIUM REVEAL
+                  </div>
+
+                  <div className="w-16 h-16 rounded-full bg-amber-950/40 border-2 border-amber-500 flex items-center justify-center text-3xl shadow-[0_0_25px_rgba(245,158,11,0.3)]">
+                    🥉
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <h3 className="font-orbitron font-extrabold text-xl sm:text-2xl text-amber-300 tracking-wider uppercase">
+                      {rank3Teams.length > 1 ? "3RD PLACE — TIE" : "3RD PLACE"}
+                    </h3>
+                    <span className="text-xs text-gray-400 font-mono">
+                      BRONZE PODIUM STANDING
+                    </span>
+                  </div>
+
+                  <div className="w-full flex flex-col gap-3">
+                    {rank3Teams.map((t) => (
+                      <div 
+                        key={t.teamId}
+                        className="bg-cyber-bg-darker/80 border border-amber-700/60 p-5 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-lg"
+                      >
+                        <div className="text-center sm:text-left min-w-0">
+                          <h4 className="font-orbitron font-bold text-lg sm:text-xl text-white uppercase truncate">
+                            {t.teamName}
+                          </h4>
+                          {t.projectName && (
+                            <p className="text-xs text-cyber-cyan font-mono mt-0.5 line-clamp-1">{t.projectName}</p>
+                          )}
+                          {t.isTie && (
+                            <span className="inline-block mt-1 text-[9px] font-mono px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold uppercase">
+                              TIED 3RD PLACE
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-center sm:text-right shrink-0">
+                          <span className="text-[10px] text-gray-400 font-mono block uppercase">FINAL SCORE</span>
+                          <span className="font-orbitron font-extrabold text-2xl text-amber-400">
+                            {t.averageScore} <span className="text-xs font-mono font-normal text-gray-400">PTS</span>
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="pt-2 w-full flex justify-center">
+                    <CyberButton
+                      variant="cyan"
+                      size="lg"
+                      onClick={() => {
+                        if (rank2Teams.length > 0) {
+                          setRevealStage("STAGE_2ND");
+                        } else {
+                          setRevealStage("STAGE_WINNER");
+                        }
+                      }}
+                      className="flex items-center gap-2 text-sm tracking-widest font-bold px-8 py-3 shadow-[0_0_20px_rgba(6,182,212,0.3)]"
+                    >
+                      REVEAL 2ND PLACE <ChevronRight className="w-4 h-4" />
+                    </CyberButton>
+                  </div>
+                </motion.div>
+              )}
+
+              {revealStage === "STAGE_2ND" && (
+                <motion.div
+                  key="stage_2nd"
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: -20 }}
+                  transition={{ duration: 0.4 }}
+                  className="w-full max-w-xl mx-auto cyber-glass border border-cyan-500/50 p-8 sm:p-10 text-center flex flex-col items-center gap-6 relative shadow-[0_0_50px_rgba(6,182,212,0.2)]"
+                >
+                  <span className="absolute top-0 left-0 w-3 h-3 bg-cyan-400" />
+                  <span className="absolute bottom-0 right-0 w-3 h-3 bg-cyan-400" />
+
+                  <div className="flex flex-col gap-1 items-center">
+                    <span className="text-[11px] font-mono tracking-widest text-cyber-cyan uppercase font-bold">
+                      STAGE 2 OF 3 • RUNNER-UP REVEAL
+                    </span>
+                    <p className="text-xs text-gray-400 font-mono uppercase tracking-wider mt-1">
+                      AND NOW... WHO TOOK SECOND PLACE?
+                    </p>
+                  </div>
+
+                  <div className="w-16 h-16 rounded-full bg-cyan-950/40 border-2 border-cyan-400 flex items-center justify-center text-3xl shadow-[0_0_25px_rgba(6,182,212,0.3)]">
+                    🥈
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <h3 className="font-orbitron font-extrabold text-xl sm:text-2xl text-cyan-200 tracking-wider uppercase">
+                      {rank2Teams.length > 1 ? "2ND PLACE — TIE" : "2ND PLACE"}
+                    </h3>
+                    <span className="text-xs text-gray-400 font-mono">
+                      SILVER PODIUM RUNNER-UP
+                    </span>
+                  </div>
+
+                  <div className="w-full flex flex-col gap-3">
+                    {rank2Teams.map((t) => (
+                      <div 
+                        key={t.teamId}
+                        className="bg-cyber-bg-darker/80 border border-cyan-500/60 p-5 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-lg"
+                      >
+                        <div className="text-center sm:text-left min-w-0">
+                          <h4 className="font-orbitron font-bold text-lg sm:text-xl text-white uppercase truncate">
+                            {t.teamName}
+                          </h4>
+                          {t.projectName && (
+                            <p className="text-xs text-cyber-cyan font-mono mt-0.5 line-clamp-1">{t.projectName}</p>
+                          )}
+                          {t.isTie && (
+                            <span className="inline-block mt-1 text-[9px] font-mono px-2 py-0.5 bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold uppercase">
+                              TIED 2ND PLACE
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-center sm:text-right shrink-0">
+                          <span className="text-[10px] text-gray-400 font-mono block uppercase">FINAL SCORE</span>
+                          <span className="font-orbitron font-extrabold text-2xl text-cyan-300">
+                            {t.averageScore} <span className="text-xs font-mono font-normal text-gray-400">PTS</span>
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="pt-2 w-full flex justify-center">
+                    <CyberButton
+                      variant="yellow"
+                      size="lg"
+                      onClick={() => {
+                        setRevealStage("STAGE_WINNER");
+                        confetti({
+                          particleCount: 100,
+                          spread: 75,
+                          origin: { y: 0.6 },
+                          colors: ["#eab308", "#06b6d4", "#d946ef", "#ffffff"]
+                        });
+                      }}
+                      className="flex items-center gap-2 text-sm tracking-widest font-bold px-8 py-3 shadow-[0_0_20px_rgba(234,179,8,0.3)]"
+                    >
+                      🏆 REVEAL WINNER <ChevronRight className="w-4 h-4" />
+                    </CyberButton>
+                  </div>
+                </motion.div>
+              )}
+
+              {revealStage === "STAGE_WINNER" && (
+                <motion.div
+                  key="stage_winner"
+                  initial={{ opacity: 0, scale: 0.9, y: 30 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: -20 }}
+                  transition={{ duration: 0.5, type: "spring", stiffness: 100 }}
+                  className="w-full max-w-xl mx-auto cyber-glass border-2 border-cyber-yellow p-8 sm:p-12 text-center flex flex-col items-center gap-6 relative shadow-[0_0_70px_rgba(234,179,8,0.35)]"
+                >
+                  <span className="absolute top-0 left-0 w-3.5 h-3.5 bg-cyber-yellow" />
+                  <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-cyber-yellow" />
+
+                  <div className="flex flex-col gap-1 items-center">
+                    <span className="text-[11px] font-mono tracking-widest text-cyber-yellow uppercase font-bold flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-cyber-yellow animate-spin" /> FINAL STAGE • CHAMPIONSHIP REVEAL
+                    </span>
+                    <p className="text-xs text-gray-300 font-mono uppercase tracking-wider mt-1">
+                      ONE TEAM REMAINS... WHO IS THE CHAMPION?
+                    </p>
+                  </div>
+
+                  <div className="w-24 h-24 rounded-full bg-cyber-yellow/15 border-2 border-cyber-yellow flex items-center justify-center text-5xl shadow-[0_0_40px_rgba(234,179,8,0.5)] animate-bounce">
+                    🏆
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <h3 className="font-orbitron font-extrabold text-2xl sm:text-3xl text-cyber-yellow tracking-widest uppercase text-glow-yellow">
+                      {rank1Teams.length > 1 ? "CO-CHAMPIONS — TIE" : "CHAMPION"}
+                    </h3>
+                    <span className="text-xs text-gray-300 font-mono tracking-wider uppercase">
+                      GRAND CHAMPION OF {currentEvent?.name?.toUpperCase()}
+                    </span>
+                  </div>
+
+                  <div className="w-full flex flex-col gap-4">
+                    {rank1Teams.map((t) => (
+                      <div 
+                        key={t.teamId}
+                        className="bg-gradient-to-r from-cyber-yellow/20 via-cyber-bg-darker to-cyber-yellow/20 border-2 border-cyber-yellow p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-[0_0_30px_rgba(234,179,8,0.25)]"
+                      >
+                        <div className="text-center sm:text-left min-w-0">
+                          <h4 className="font-orbitron font-extrabold text-xl sm:text-2xl text-white uppercase truncate text-glow-yellow">
+                            {t.teamName}
+                          </h4>
+                          {t.projectName && (
+                            <p className="text-sm text-cyber-cyan font-mono mt-1 font-semibold line-clamp-1">{t.projectName}</p>
+                          )}
+                          {t.isTie && (
+                            <span className="inline-block mt-2 text-[10px] font-mono px-2.5 py-0.5 bg-cyber-yellow/30 text-cyber-yellow border border-cyber-yellow font-bold uppercase">
+                              TIED 1ST PLACE • CO-CHAMPION
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-center sm:text-right shrink-0">
+                          <span className="text-[10px] text-gray-400 font-mono block uppercase">FINAL WINNING SCORE</span>
+                          <span className="font-orbitron font-extrabold text-3xl text-cyber-yellow text-glow-yellow">
+                            {t.averageScore} <span className="text-xs font-mono font-normal text-gray-300">PTS</span>
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="pt-4 w-full flex justify-center">
+                    <CyberButton
+                      variant="cyan"
+                      size="lg"
+                      onClick={() => setRevealStage("FULL_RESULTS")}
+                      className="flex items-center gap-2 text-sm tracking-widest font-bold px-10 py-3.5 shadow-[0_0_30px_rgba(6,182,212,0.4)]"
+                    >
+                      VIEW FULL RESULTS →
+                    </CyberButton>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         ) : (
           <div className="flex flex-col w-full">
+            {/* Top Bar with Replay Reveal Option */}
+            <div className="flex items-center justify-between bg-cyber-bg-darker/80 border border-cyber-cyan/30 px-4 py-2.5 mb-6 flex-wrap gap-2">
+              <div className="flex items-center gap-2 font-mono text-xs text-cyber-cyan">
+                <Award className="w-4 h-4 text-cyber-yellow" />
+                <span className="font-bold uppercase tracking-wider">FULL COMPETITION LEADERBOARD REVEALED</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setRevealStage("NOT_STARTED");
+                  confettiTriggeredRef.current = false;
+                }}
+                className="text-[11px] font-mono text-gray-400 hover:text-white uppercase transition-colors flex items-center gap-1 cursor-pointer"
+              >
+                ↺ REPLAY REVEAL EXPERIENCE
+              </button>
+            </div>
+
             {/* OFFICIAL RESULT DECLARATION BANNER */}
             {resultsDeclared ? (
               <div className="bg-cyber-green/10 border border-cyber-green/40 p-4 mb-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left shadow-[0_0_30px_rgba(16,185,129,0.15)]">
