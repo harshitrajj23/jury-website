@@ -38,7 +38,9 @@ import {
   initDatabase,
   getEvents,
   createEvent,
-  updateEvent
+  updateEvent,
+  declareResults,
+  revokeResultsDeclaration
 } from "@/lib/db";
 import { Judge, Team, ScoringCriteria, ScoreRecord, LeaderboardEntry, EventItem } from "@/lib/types";
 import { useRealtimeSync } from "@/lib/useRealtimeSync";
@@ -96,6 +98,10 @@ export default function AdminConsolePage() {
   // Event Modals state
   const [isEditEventModalOpen, setIsEditEventModalOpen] = useState(false);
   const [isCreateEventModalOpen, setIsCreateEventModalOpen] = useState(false);
+
+  // Result Declaration state
+  const [isDeclareResultsModalOpen, setIsDeclareResultsModalOpen] = useState(false);
+  const [declareOverride, setDeclareOverride] = useState(false);
 
   // Loading indicator states
   const [dbLoading, setDbLoading] = useState(true);
@@ -427,6 +433,49 @@ export default function AdminConsolePage() {
       alert("SYSTEM STATUS: SCORING PARAMETERS UPDATED FOR CURRENT EVENT.");
     } catch (err: any) {
       alert(`FAIL: CONFIG TRANSMISSION FAILURE. (${err?.message || "Database error"})`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleConfirmDeclareResults = async () => {
+    if (actionLoading) return;
+    setActionLoading(true);
+    try {
+      const res = await declareResults(selectedEventId);
+      if (!res.success) {
+        alert(`FAIL: RESULT DECLARATION FAILED.\n\n${res.error}`);
+        return;
+      }
+      setIsDeclareResultsModalOpen(false);
+      setDeclareOverride(false);
+      alert(`🏆 FINAL RESULTS OFFICIALLY DECLARED FOR "${currentEvent?.name || selectedEventId}".`);
+      await fetchDbData(selectedEventId, false);
+    } catch (err: any) {
+      alert(`FAIL: DECLARATION ERROR: ${err?.message || "Database error"}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRevokeResults = async () => {
+    if (actionLoading) return;
+    const confirmRevoke = window.confirm(
+      `⚠️ RE-OPEN EVALUATION?\n\nAre you sure you want to revoke results declaration for "${currentEvent?.name || selectedEventId}"? The event will transition back to ACTIVE evaluation state.`
+    );
+    if (!confirmRevoke) return;
+
+    setActionLoading(true);
+    try {
+      const res = await revokeResultsDeclaration(selectedEventId);
+      if (!res.success) {
+        alert(`FAIL: REVOKING DECLARATION FAILED.\n\n${res.error}`);
+        return;
+      }
+      alert(`✅ EVALUATION RE-OPENED FOR "${currentEvent?.name || selectedEventId}".`);
+      await fetchDbData(selectedEventId, false);
+    } catch (err: any) {
+      alert(`FAIL: ERROR REVOKING DECLARATION: ${err?.message || "Database error"}`);
     } finally {
       setActionLoading(false);
     }
@@ -1474,49 +1523,235 @@ export default function AdminConsolePage() {
         )}
 
         {/* ============================================================== */}
-        {/* TAB 7: LEADERBOARD                                             */}
+        {/* TAB 7: LEADERBOARD & RESULT DECLARATION                         */}
         {/* ============================================================== */}
-        {activeTab === "leaderboard" && (
-          <div className="cyber-glass border border-cyber-magenta/20 p-6 flex flex-col gap-4">
-            <h2 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase border-b border-cyber-magenta/15 pb-2">
-              🏆 LEADERBOARD RANKINGS ({currentEvent?.name?.toUpperCase() || selectedEventId})
-            </h2>
+        {activeTab === "leaderboard" && (() => {
+          const totalEvaluationsNeeded = teams.length * judges.length;
+          const completedEvaluations = scores.length;
+          const pendingEvaluations = Math.max(0, totalEvaluationsNeeded - completedEvaluations);
+          const isFullyComplete = totalEvaluationsNeeded > 0 && pendingEvaluations === 0;
+          const isDeclared = Boolean(currentEvent?.resultsDeclared);
+          const canDeclare = (isFullyComplete || declareOverride) && teams.length > 0;
 
-            <div className="flex flex-col gap-3">
-              {leaderboard.length === 0 ? (
-                <p className="text-xs font-mono italic text-gray-500 text-center py-6">No scores compiled yet for this event.</p>
-              ) : (
-                leaderboard.map((entry) => (
-                  <div key={entry.teamId} className="bg-cyber-bg-darker/60 border border-gray-800 p-3.5 flex justify-between items-center hover:border-cyber-magenta/30">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-9 h-9 flex items-center justify-center font-orbitron font-extrabold text-sm border ${
-                        entry.rank === 1 ? "border-cyber-yellow text-cyber-yellow bg-cyber-yellow/10" :
-                        entry.rank === 2 ? "border-cyber-cyan text-cyber-cyan bg-cyber-cyan/10" :
-                        entry.rank === 3 ? "border-cyber-magenta text-cyber-magenta bg-cyber-magenta/10" :
-                        "border-gray-800 text-gray-400"
-                      }`}>
-                        #{entry.rank}
-                      </div>
-                      <div>
-                        <span className="font-orbitron font-bold text-xs text-white uppercase">{entry.teamName}</span>
-                        <span className="text-[9px] text-gray-500 font-mono block">
-                          Scored by {entry.judgeSubmissions.length} Jurists
-                        </span>
-                      </div>
-                    </div>
+          return (
+            <div className="flex flex-col gap-6">
+              {/* Result Declaration Control Card */}
+              <div className="cyber-glass border border-cyber-magenta/30 p-6 flex flex-col gap-4">
+                <div className="flex items-center justify-between border-b border-cyber-magenta/20 pb-3 flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <Trophy className="w-5 h-5 text-cyber-magenta" />
+                    <h2 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase">
+                      RESULT DECLARATION & AUDIT: {currentEvent?.name?.toUpperCase() || selectedEventId}
+                    </h2>
+                  </div>
+                  <span className="font-mono text-xs px-2.5 py-0.5 border font-bold uppercase tracking-wider"
+                    style={{
+                      borderColor: isDeclared ? "var(--cyber-green, #10b981)" : "var(--cyber-yellow, #eab308)",
+                      color: isDeclared ? "var(--cyber-green, #10b981)" : "var(--cyber-yellow, #eab308)",
+                      backgroundColor: isDeclared ? "rgba(16, 185, 129, 0.1)" : "rgba(234, 179, 8, 0.1)",
+                    }}
+                  >
+                    {isDeclared ? "● RESULTS DECLARED • FINAL" : "○ PROVISIONAL / ACTIVE"}
+                  </span>
+                </div>
 
-                    <div className="text-right">
-                      <span className="text-[9px] text-gray-500 font-mono uppercase block">WEIGHTED AVG</span>
-                      <span className="font-orbitron font-extrabold text-base text-cyber-magenta">
-                        {entry.averageScore} PTS
+                {isDeclared ? (
+                  <div className="bg-cyber-green/10 border border-cyber-green/30 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-cyber-green animate-ping" />
+                        <h3 className="font-orbitron font-bold text-sm text-cyber-green uppercase tracking-wider">
+                          🏆 OFFICIAL RESULTS DECLARED
+                        </h3>
+                      </div>
+                      <p className="font-mono text-xs text-gray-300">
+                        {currentEvent?.declaredAt ? (
+                          <>Declared on: {new Date(currentEvent.declaredAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}</>
+                        ) : (
+                          <>Timestamp recorded in database</>
+                        )}
+                      </p>
+                      <span className="text-[10px] font-mono text-gray-400">
+                        Scores are finalized and publicly accessible on the Results Podium. No accidental modifications allowed.
                       </span>
                     </div>
+
+                    <CyberButton
+                      type="button"
+                      variant="red"
+                      size="sm"
+                      onClick={handleRevokeResults}
+                      disabled={actionLoading}
+                      className="shrink-0"
+                    >
+                      RE-OPEN EVALUATION
+                    </CyberButton>
                   </div>
-                ))
+                ) : (
+                  <div className="bg-cyber-bg-darker/60 border border-cyber-magenta/20 p-4 flex flex-col gap-3">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      <div>
+                        <h3 className="font-orbitron text-xs font-bold text-gray-200 uppercase tracking-wider">
+                          EVALUATION PROGRESS: {completedEvaluations} / {totalEvaluationsNeeded} EVALUATIONS COMPLETE
+                        </h3>
+                        <p className="font-mono text-xs text-gray-400 mt-0.5">
+                          {teams.length} Teams registered • {judges.length} Judges assigned • {pendingEvaluations} pending evaluations
+                        </p>
+                      </div>
+
+                      <CyberButton
+                        type="button"
+                        variant="yellow"
+                        size="sm"
+                        disabled={!canDeclare || actionLoading}
+                        onClick={() => setIsDeclareResultsModalOpen(true)}
+                        className="flex items-center gap-1.5 shrink-0"
+                      >
+                        <Trophy className="w-4 h-4" /> DECLARE FINAL RESULTS
+                      </CyberButton>
+                    </div>
+
+                    {!isFullyComplete && (
+                      <div className="border border-cyber-yellow/30 bg-cyber-yellow/10 p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs font-mono">
+                        <span className="text-cyber-yellow">
+                          ⚠️ Results cannot be declared yet. {pendingEvaluations} evaluation(s) still pending across judges.
+                        </span>
+                        <label className="flex items-center gap-2 text-gray-300 hover:text-white cursor-pointer select-none shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={declareOverride}
+                            onChange={(e) => setDeclareOverride(e.target.checked)}
+                            className="accent-cyber-yellow cursor-pointer"
+                          />
+                          <span className="text-[11px] font-bold text-cyber-yellow uppercase">
+                            ADMIN OVERRIDE
+                          </span>
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Leaderboard Table */}
+              <div className="cyber-glass border border-cyber-magenta/20 p-6 flex flex-col gap-4">
+                <div className="flex items-center justify-between border-b border-cyber-magenta/15 pb-2">
+                  <h3 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase">
+                    🏆 LEADERBOARD RANKINGS ({currentEvent?.name?.toUpperCase() || selectedEventId})
+                  </h3>
+                  <span className="font-mono text-xs text-gray-400">
+                    {leaderboard.length} Ranked Teams
+                  </span>
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  {leaderboard.length === 0 ? (
+                    <p className="text-xs font-mono italic text-gray-500 text-center py-6">No scores compiled yet for this event.</p>
+                  ) : (
+                    leaderboard.map((entry) => (
+                      <div key={entry.teamId} className="bg-cyber-bg-darker/60 border border-gray-800 p-3.5 flex justify-between items-center hover:border-cyber-magenta/30">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-9 h-9 flex items-center justify-center font-orbitron font-extrabold text-sm border ${
+                            entry.rank === 1 ? "border-cyber-yellow text-cyber-yellow bg-cyber-yellow/10" :
+                            entry.rank === 2 ? "border-cyber-cyan text-cyber-cyan bg-cyber-cyan/10" :
+                            entry.rank === 3 ? "border-cyber-magenta text-cyber-magenta bg-cyber-magenta/10" :
+                            "border-gray-800 text-gray-400"
+                          }`}>
+                            #{entry.rank}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-orbitron font-bold text-xs text-white uppercase">{entry.teamName}</span>
+                              {entry.isTie && (
+                                <span className="text-[9px] font-mono px-1.5 py-0.2 bg-cyber-yellow/20 text-cyber-yellow border border-cyber-yellow/40 font-bold">
+                                  {entry.tieLabel || "TIE"}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[9px] text-gray-500 font-mono block">
+                              Scored by {entry.judgeSubmissions.length} Jurists
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <span className="text-[9px] text-gray-500 font-mono uppercase block">WEIGHTED AVG</span>
+                          <span className="font-orbitron font-extrabold text-base text-cyber-magenta">
+                            {entry.averageScore} PTS
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* CONFIRMATION DIALOG MODAL */}
+              {isDeclareResultsModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
+                  <div className="w-full max-w-lg bg-cyber-bg-dark border border-cyber-yellow p-6 shadow-[0_0_35px_rgba(234,179,8,0.25)] flex flex-col gap-4">
+                    <div className="flex items-center justify-between border-b border-cyber-yellow/30 pb-3">
+                      <div className="flex items-center gap-2">
+                        <Trophy className="w-5 h-5 text-cyber-yellow" />
+                        <h3 className="font-orbitron text-base font-bold text-white uppercase tracking-wider">
+                          DECLARE FINAL RESULTS?
+                        </h3>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsDeclareResultsModalOpen(false)}
+                        className="text-gray-400 hover:text-white transition-colors"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    <div className="flex flex-col gap-3 font-mono text-xs text-gray-300">
+                      <div className="p-3 bg-cyber-bg-darker border border-gray-800 flex flex-col gap-1">
+                        <div className="text-white font-bold">Event: {currentEvent?.name || selectedEventId}</div>
+                        <div>Evaluations completed: {completedEvaluations} / {totalEvaluationsNeeded}</div>
+                        {declareOverride && pendingEvaluations > 0 && (
+                          <div className="text-cyber-yellow font-bold">⚡ ADMIN OVERRIDE ACTIVE ({pendingEvaluations} pending evaluations)</div>
+                        )}
+                      </div>
+
+                      <p className="text-gray-400">Once results are declared:</p>
+                      <ul className="list-disc pl-5 space-y-1 text-gray-300">
+                        <li>Leaderboard becomes <span className="text-cyber-green font-bold">FINAL</span></li>
+                        <li>Animated podium is officially displayed on results page</li>
+                        <li>Result declaration timestamp is permanently stored</li>
+                        <li>Event result state transitions to <span className="text-cyber-cyan font-bold">DECLARED</span></li>
+                        <li>All evaluation scores and audit records remain intact</li>
+                      </ul>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-3 border-t border-cyber-yellow/20 pt-4 mt-2">
+                      <CyberButton
+                        type="button"
+                        variant="cyan"
+                        size="md"
+                        onClick={() => setIsDeclareResultsModalOpen(false)}
+                        disabled={actionLoading}
+                      >
+                        CANCEL
+                      </CyberButton>
+                      <CyberButton
+                        type="button"
+                        variant="yellow"
+                        size="md"
+                        onClick={handleConfirmDeclareResults}
+                        disabled={actionLoading}
+                        className="flex items-center gap-2"
+                      >
+                        <Trophy className="w-4 h-4" /> {actionLoading ? "DECLARING..." : "CONFIRM & DECLARE RESULTS"}
+                      </CyberButton>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* ============================================================== */}
         {/* TAB 8: BROADCAST SYSTEM & SCORES MANAGEMENT                    */}

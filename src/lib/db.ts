@@ -194,7 +194,7 @@ export async function getEvents(): Promise<EventItem[]> {
   try {
     const sql = getDb();
     const rows = await sql`
-      SELECT id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active, "createdAt", "updatedAt"
+      SELECT id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", "resultsDeclared", "declaredAt", active, "createdAt", "updatedAt"
       FROM "Event"
       WHERE active = true
       ORDER BY "createdAt" ASC;
@@ -213,6 +213,8 @@ export async function getEvents(): Promise<EventItem[]> {
       timerDuration: typeof e.timerDuration === "number" ? e.timerDuration : 300,
       judgingOpen: e.judgingOpen !== false,
       leaderboardUnlocked: Boolean(e.leaderboardUnlocked),
+      resultsDeclared: Boolean(e.resultsDeclared),
+      declaredAt: e.declaredAt ? new Date(e.declaredAt).toISOString() : undefined,
       finaleReady: Boolean(e.finaleReady),
       active: Boolean(e.active),
       createdAt: e.createdAt ? new Date(e.createdAt).toISOString() : undefined,
@@ -244,7 +246,7 @@ export async function getEvent(eventId: string = "default_event"): Promise<Event
   try {
     const sql = getDb();
     const rows = await sql`
-      SELECT id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active
+      SELECT id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", "resultsDeclared", "declaredAt", active
       FROM "Event"
       WHERE id = ${eventId}
       LIMIT 1;
@@ -264,6 +266,8 @@ export async function getEvent(eventId: string = "default_event"): Promise<Event
       timerDuration: typeof e.timerDuration === "number" ? e.timerDuration : 300,
       judgingOpen: e.judgingOpen !== false,
       leaderboardUnlocked: Boolean(e.leaderboardUnlocked),
+      resultsDeclared: Boolean(e.resultsDeclared),
+      declaredAt: e.declaredAt ? new Date(e.declaredAt).toISOString() : undefined,
       finaleReady: Boolean(e.finaleReady),
       active: Boolean(e.active),
     };
@@ -622,7 +626,7 @@ export async function getConfig(eventId: string = "default_event"): Promise<AppC
 
     // Query event-specific settings and criteria strictly scoped to eventId
     const [eventRows, settingsRows] = await Promise.all([
-      sql`SELECT id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady" FROM "Event" WHERE id = ${eventId} LIMIT 1;`,
+      sql`SELECT id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", "resultsDeclared", "declaredAt" FROM "Event" WHERE id = ${eventId} LIMIT 1;`,
       sql`SELECT "leaderboardUnlocked", "judgingOpen", "finaleReady", "timerDuration" FROM "Settings" WHERE id = 'global' LIMIT 1;`,
     ]);
 
@@ -648,6 +652,8 @@ export async function getConfig(eventId: string = "default_event"): Promise<AppC
     const timerDuration = ev ? ev.timerDuration : (typeof settings.timerDuration === 'number' ? settings.timerDuration : 300);
     const judgingOpen = ev ? ev.judgingOpen !== false : settings.judgingOpen !== false;
     const announceResults = ev ? Boolean(ev.leaderboardUnlocked) : Boolean(settings.leaderboardUnlocked);
+    const resultsDeclared = ev ? Boolean(ev.resultsDeclared) : false;
+    const declaredAt = ev?.declaredAt ? new Date(ev.declaredAt).toISOString() : undefined;
     const finaleReady = ev ? Boolean(ev.finaleReady) : Boolean(settings.finaleReady);
 
     const criteriaList: ScoringCriteria[] = (criteriaRows || []).map((c: any) => ({
@@ -667,15 +673,23 @@ export async function getConfig(eventId: string = "default_event"): Promise<AppC
       subtitle: ev.subtitle || "",
       organizer: ev.organizer || "",
       logo: ev.logo || "",
+      organizerLogo: ev.organizerLogo || "",
+      date: ev.date || "",
+      theme: ev.theme || "",
+      status: ev.status || "active",
       timerDuration,
       judgingOpen,
       leaderboardUnlocked: announceResults,
+      resultsDeclared,
+      declaredAt,
       finaleReady,
       active: true,
     } : undefined;
 
     return {
       announceResults,
+      resultsDeclared,
+      declaredAt,
       judgingOpen,
       finaleReady,
       timerDuration,
@@ -788,6 +802,61 @@ export async function toggleAnnounceResults(announce: boolean, eventId: string =
   } catch (err: any) {
     console.error("Neon DB Error (toggleAnnounceResults):", err);
     return { success: false, error: err?.message || "Failed to toggle broadcast." };
+  }
+}
+
+export async function declareResults(eventId: string = "default_event"): Promise<ActionResult<{ declaredAt: string }>> {
+  try {
+    const sql = getDb();
+    const now = new Date();
+    await sql`
+      UPDATE "Event" 
+      SET "resultsDeclared" = true,
+          "declaredAt" = ${now},
+          "leaderboardUnlocked" = true,
+          "status" = 'results_declared',
+          "updatedAt" = NOW() 
+      WHERE id = ${eventId};
+    `;
+
+    if (eventId === "default_event") {
+      await sql`
+        UPDATE "Settings" 
+        SET "leaderboardUnlocked" = true,
+            "updatedAt" = NOW() 
+        WHERE id = 'global';
+      `;
+    }
+
+    const declaredAtIso = now.toISOString();
+    await logAudit("DECLARE_RESULTS", `Final results officially declared for event ${eventId}`, undefined, eventId);
+    await broadcastRealtimeEvent({ table: "Event", action: "DECLARE_RESULTS", eventId, data: { resultsDeclared: true, declaredAt: declaredAtIso, eventId } });
+    await broadcastRealtimeEvent({ table: "Settings", action: "TOGGLE_BROADCAST", eventId, data: { announce: true, eventId } });
+    return { success: true, data: { declaredAt: declaredAtIso } };
+  } catch (err: any) {
+    console.error("Neon DB Error (declareResults):", err);
+    return { success: false, error: err?.message || "Failed to declare results." };
+  }
+}
+
+export async function revokeResultsDeclaration(eventId: string = "default_event"): Promise<ActionResult> {
+  try {
+    const sql = getDb();
+    await sql`
+      UPDATE "Event" 
+      SET "resultsDeclared" = false,
+          "declaredAt" = NULL,
+          "status" = 'active',
+          "updatedAt" = NOW() 
+      WHERE id = ${eventId};
+    `;
+
+    await logAudit("REVOKE_RESULTS_DECLARATION", `Results declaration revoked for event ${eventId}`, undefined, eventId);
+    await broadcastRealtimeEvent({ table: "Event", action: "REVOKE_RESULTS_DECLARATION", eventId, data: { resultsDeclared: false, eventId } });
+    return { success: true };
+  } catch (err: any) {
+    console.error("Neon DB Error (revokeResultsDeclaration):", err);
+    return { success: false, error: err?.message || "Failed to revoke results declaration." };
   }
 }
 

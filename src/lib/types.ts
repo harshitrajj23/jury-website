@@ -63,6 +63,8 @@ export interface EventItem {
   timerDuration: number; // in seconds
   judgingOpen: boolean;
   leaderboardUnlocked: boolean;
+  resultsDeclared?: boolean;
+  declaredAt?: string;
   finaleReady?: boolean;
   active: boolean;
   createdAt?: string;
@@ -71,6 +73,8 @@ export interface EventItem {
 
 export interface AppConfig {
   announceResults: boolean;
+  resultsDeclared?: boolean;
+  declaredAt?: string;
   criteriaList: ScoringCriteria[];
   timerDuration: number; // in seconds
   disqualifiedTeams?: string[];
@@ -82,11 +86,18 @@ export interface AppConfig {
 
 export interface LeaderboardEntry {
   rank: number;
+  displayRank?: string; // e.g. "1", "2", "TIED 2ND"
+  isTie?: boolean;
+  tieLabel?: string;
   teamId: string;
   teamName: string;
   projectName?: string;
-  averageScore: number; // weighted average score
-  rawAverageScore?: number; // unweighted average score
+  tableNumber?: number;
+  averageScore: number; // weighted average score (displayed rounded)
+  rawWeightedScore?: number; // FULL UNROUNDED weighted score for primary ranking
+  rawAverageScore?: number; // unweighted average score for secondary tiebreaker
+  perfectTensCount?: number; // third tiebreaker: count of 10s
+  ninesCount?: number; // fourth tiebreaker: count of 9s
   judgeSubmissions: {
     judgeId: string;
     judgeName: string;
