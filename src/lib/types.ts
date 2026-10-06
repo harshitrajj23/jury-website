@@ -65,6 +65,8 @@ export interface EventItem {
   leaderboardUnlocked: boolean;
   resultsDeclared?: boolean;
   declaredAt?: string;
+  resultsPublished?: boolean;
+  resultsPublishedAt?: string;
   finaleReady?: boolean;
   active: boolean;
   createdAt?: string;
@@ -75,6 +77,8 @@ export interface AppConfig {
   announceResults: boolean;
   resultsDeclared?: boolean;
   declaredAt?: string;
+  resultsPublished?: boolean;
+  resultsPublishedAt?: string;
   criteriaList: ScoringCriteria[];
   timerDuration: number; // in seconds
   disqualifiedTeams?: string[];

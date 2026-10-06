@@ -194,7 +194,7 @@ export async function getEvents(): Promise<EventItem[]> {
   try {
     const sql = getDb();
     const rows = await sql`
-      SELECT id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", "resultsDeclared", "declaredAt", active, "createdAt", "updatedAt"
+      SELECT id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", "resultsDeclared", "declaredAt", "resultsPublished", "resultsPublishedAt", active, "createdAt", "updatedAt"
       FROM "Event"
       WHERE active = true
       ORDER BY "createdAt" ASC;
@@ -215,6 +215,8 @@ export async function getEvents(): Promise<EventItem[]> {
       leaderboardUnlocked: Boolean(e.leaderboardUnlocked),
       resultsDeclared: Boolean(e.resultsDeclared),
       declaredAt: e.declaredAt ? new Date(e.declaredAt).toISOString() : undefined,
+      resultsPublished: Boolean(e.resultsPublished || e.resultsDeclared),
+      resultsPublishedAt: e.resultsPublishedAt ? new Date(e.resultsPublishedAt).toISOString() : (e.declaredAt ? new Date(e.declaredAt).toISOString() : undefined),
       finaleReady: Boolean(e.finaleReady),
       active: Boolean(e.active),
       createdAt: e.createdAt ? new Date(e.createdAt).toISOString() : undefined,
@@ -236,6 +238,7 @@ export async function getEvents(): Promise<EventItem[]> {
         timerDuration: 300,
         judgingOpen: true,
         leaderboardUnlocked: false,
+        resultsPublished: false,
         active: true,
       },
     ];
@@ -246,7 +249,7 @@ export async function getEvent(eventId: string = "default_event"): Promise<Event
   try {
     const sql = getDb();
     const rows = await sql`
-      SELECT id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", "resultsDeclared", "declaredAt", active
+      SELECT id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", "resultsDeclared", "declaredAt", "resultsPublished", "resultsPublishedAt", active
       FROM "Event"
       WHERE id = ${eventId}
       LIMIT 1;
@@ -268,6 +271,8 @@ export async function getEvent(eventId: string = "default_event"): Promise<Event
       leaderboardUnlocked: Boolean(e.leaderboardUnlocked),
       resultsDeclared: Boolean(e.resultsDeclared),
       declaredAt: e.declaredAt ? new Date(e.declaredAt).toISOString() : undefined,
+      resultsPublished: Boolean(e.resultsPublished || e.resultsDeclared),
+      resultsPublishedAt: e.resultsPublishedAt ? new Date(e.resultsPublishedAt).toISOString() : (e.declaredAt ? new Date(e.declaredAt).toISOString() : undefined),
       finaleReady: Boolean(e.finaleReady),
       active: Boolean(e.active),
     };
@@ -412,7 +417,7 @@ export async function deleteEvent(eventId: string): Promise<ActionResult> {
 
     // Verify event exists
     const evRows = await sql`
-      SELECT id, name, "resultsDeclared" 
+      SELECT id, name, "resultsPublished", "resultsDeclared" 
       FROM "Event" 
       WHERE id = ${eventId} 
       LIMIT 1;
@@ -674,7 +679,7 @@ export async function getConfig(eventId: string = "default_event"): Promise<AppC
 
     // Query event-specific settings and criteria strictly scoped to eventId
     const [eventRows, settingsRows] = await Promise.all([
-      sql`SELECT id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", "resultsDeclared", "declaredAt" FROM "Event" WHERE id = ${eventId} LIMIT 1;`,
+      sql`SELECT id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", "resultsDeclared", "declaredAt", "resultsPublished", "resultsPublishedAt" FROM "Event" WHERE id = ${eventId} LIMIT 1;`,
       sql`SELECT "leaderboardUnlocked", "judgingOpen", "finaleReady", "timerDuration" FROM "Settings" WHERE id = 'global' LIMIT 1;`,
     ]);
 
@@ -702,6 +707,8 @@ export async function getConfig(eventId: string = "default_event"): Promise<AppC
     const announceResults = ev ? Boolean(ev.leaderboardUnlocked) : Boolean(settings.leaderboardUnlocked);
     const resultsDeclared = ev ? Boolean(ev.resultsDeclared) : false;
     const declaredAt = ev?.declaredAt ? new Date(ev.declaredAt).toISOString() : undefined;
+    const resultsPublished = ev ? Boolean(ev.resultsPublished || ev.resultsDeclared) : false;
+    const resultsPublishedAt = ev?.resultsPublishedAt ? new Date(ev.resultsPublishedAt).toISOString() : (ev?.declaredAt ? new Date(ev.declaredAt).toISOString() : undefined);
     const finaleReady = ev ? Boolean(ev.finaleReady) : Boolean(settings.finaleReady);
 
     const criteriaList: ScoringCriteria[] = (criteriaRows || []).map((c: any) => ({
@@ -730,6 +737,8 @@ export async function getConfig(eventId: string = "default_event"): Promise<AppC
       leaderboardUnlocked: announceResults,
       resultsDeclared,
       declaredAt,
+      resultsPublished,
+      resultsPublishedAt,
       finaleReady,
       active: true,
     } : undefined;
@@ -738,6 +747,8 @@ export async function getConfig(eventId: string = "default_event"): Promise<AppC
       announceResults,
       resultsDeclared,
       declaredAt,
+      resultsPublished,
+      resultsPublishedAt,
       judgingOpen,
       finaleReady,
       timerDuration,
@@ -853,16 +864,18 @@ export async function toggleAnnounceResults(announce: boolean, eventId: string =
   }
 }
 
-export async function declareResults(eventId: string = "default_event"): Promise<ActionResult<{ declaredAt: string }>> {
+export async function publishResults(eventId: string = "default_event"): Promise<ActionResult<{ publishedAt: string }>> {
   try {
     const sql = getDb();
     const now = new Date();
     await sql`
       UPDATE "Event" 
-      SET "resultsDeclared" = true,
+      SET "resultsPublished" = true,
+          "resultsPublishedAt" = ${now},
+          "resultsDeclared" = true,
           "declaredAt" = ${now},
           "leaderboardUnlocked" = true,
-          "status" = 'results_declared',
+          "status" = 'published',
           "updatedAt" = NOW() 
       WHERE id = ${eventId};
     `;
@@ -876,15 +889,25 @@ export async function declareResults(eventId: string = "default_event"): Promise
       `;
     }
 
-    const declaredAtIso = now.toISOString();
-    await logAudit("DECLARE_RESULTS", `Final results officially declared for event ${eventId}`, undefined, eventId);
-    await broadcastRealtimeEvent({ table: "Event", action: "DECLARE_RESULTS", eventId, data: { resultsDeclared: true, declaredAt: declaredAtIso, eventId } });
+    const publishedAtIso = now.toISOString();
+    await logAudit("PUBLISH_RESULTS", `Final results officially published for event ${eventId}`, undefined, eventId);
+    await broadcastRealtimeEvent({ 
+      table: "Event", 
+      action: "PUBLISH_RESULTS", 
+      eventId, 
+      data: { resultsPublished: true, resultsPublishedAt: publishedAtIso, resultsDeclared: true, declaredAt: publishedAtIso, eventId } 
+    });
     await broadcastRealtimeEvent({ table: "Settings", action: "TOGGLE_BROADCAST", eventId, data: { announce: true, eventId } });
-    return { success: true, data: { declaredAt: declaredAtIso } };
+    return { success: true, data: { publishedAt: publishedAtIso } };
   } catch (err: any) {
-    console.error("Neon DB Error (declareResults):", err);
-    return { success: false, error: err?.message || "Failed to declare results." };
+    console.error("Neon DB Error (publishResults):", err);
+    return { success: false, error: err?.message || "Failed to publish results." };
   }
+}
+
+export async function declareResults(eventId: string = "default_event"): Promise<ActionResult<{ declaredAt: string }>> {
+  const res = await publishResults(eventId);
+  return res.success ? { success: true, data: { declaredAt: res.data!.publishedAt } } : { success: false, error: res.error };
 }
 
 export async function revokeResultsDeclaration(eventId: string = "default_event"): Promise<ActionResult> {
@@ -892,19 +915,97 @@ export async function revokeResultsDeclaration(eventId: string = "default_event"
     const sql = getDb();
     await sql`
       UPDATE "Event" 
-      SET "resultsDeclared" = false,
+      SET "resultsPublished" = false,
+          "resultsPublishedAt" = NULL,
+          "resultsDeclared" = false,
           "declaredAt" = NULL,
+          "leaderboardUnlocked" = false,
           "status" = 'active',
           "updatedAt" = NOW() 
       WHERE id = ${eventId};
     `;
 
-    await logAudit("REVOKE_RESULTS_DECLARATION", `Results declaration revoked for event ${eventId}`, undefined, eventId);
-    await broadcastRealtimeEvent({ table: "Event", action: "REVOKE_RESULTS_DECLARATION", eventId, data: { resultsDeclared: false, eventId } });
+    if (eventId === "default_event") {
+      await sql`
+        UPDATE "Settings" 
+        SET "leaderboardUnlocked" = false,
+            "updatedAt" = NOW() 
+        WHERE id = 'global';
+      `;
+    }
+
+    await logAudit("REVOKE_RESULTS_DECLARATION", `Results publication revoked for event ${eventId}`, undefined, eventId);
+    await broadcastRealtimeEvent({ 
+      table: "Event", 
+      action: "REVOKE_RESULTS_DECLARATION", 
+      eventId, 
+      data: { resultsPublished: false, resultsDeclared: false, eventId } 
+    });
+    await broadcastRealtimeEvent({ table: "Settings", action: "TOGGLE_BROADCAST", eventId, data: { announce: false, eventId } });
     return { success: true };
   } catch (err: any) {
     console.error("Neon DB Error (revokeResultsDeclaration):", err);
     return { success: false, error: err?.message || "Failed to revoke results declaration." };
+  }
+}
+
+/**
+ * Public Results Endpoint - STAGED REVEAL ACCESS CONTROL (Spec 18 & 20)
+ * Backend enforces that BEFORE publication, NO SCORES, RANKS, WEIGHTED TOTALS OR WINNER INFO
+ * ARE RETURNED TO THE BROWSER.
+ */
+export async function getPublicResults(eventId: string = "default_event"): Promise<{
+  published: boolean;
+  publishedAt?: string;
+  leaderboard: LeaderboardEntry[];
+  event: EventItem | null;
+  totalTeams: number;
+}> {
+  try {
+    const ev = await getEvent(eventId);
+    if (!ev) {
+      return { published: false, leaderboard: [], event: null, totalTeams: 0 };
+    }
+
+    const isPublished = Boolean(ev.resultsPublished || ev.resultsDeclared);
+    if (!isPublished) {
+      // SECURITY ENFORCEMENT: Never send scores, ranks, weighted totals or winner info to browser when unpublished!
+      return {
+        published: false,
+        leaderboard: [],
+        event: {
+          id: ev.id,
+          name: ev.name,
+          subtitle: ev.subtitle,
+          organizer: ev.organizer,
+          logo: ev.logo,
+          organizerLogo: ev.organizerLogo,
+          date: ev.date,
+          theme: ev.theme,
+          status: ev.status,
+          timerDuration: ev.timerDuration,
+          judgingOpen: ev.judgingOpen,
+          leaderboardUnlocked: false,
+          resultsPublished: false,
+          resultsDeclared: false,
+          active: ev.active,
+        },
+        totalTeams: 0,
+      };
+    }
+
+    // Results are published: safely return complete leaderboard
+    const leaderboard = await getLeaderboard(eventId);
+    return {
+      published: true,
+      publishedAt: ev.resultsPublishedAt || ev.declaredAt,
+      leaderboard,
+      event: ev,
+      totalTeams: leaderboard.length,
+    };
+  } catch (err) {
+    console.error("Neon DB Error (getPublicResults):", err);
+    return { published: false, leaderboard: [], event: null, totalTeams: 0 };
   }
 }
 
