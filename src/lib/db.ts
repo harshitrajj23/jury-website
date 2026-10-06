@@ -1161,69 +1161,140 @@ export async function getLeaderboard(eventId: string = "default_event"): Promise
 
     const activeTeams = allTeams.filter((t) => !t.name.startsWith("[DISQUALIFIED]"));
 
-    const entries: Omit<LeaderboardEntry, "rank">[] = activeTeams.map((team) => {
+    const entries = activeTeams.map((team) => {
       const teamScores = scores.filter((s) => s.teamId === team.id);
+
+      let totalTens = 0;
+      let totalNines = 0;
 
       const judgeSubmissions = teamScores.map((ts) => {
         const judge = judges.find((j) => j.id === ts.judgeId);
         
-        let weightedTotal = 0;
+        let rawWeightedTotal = 0;
         for (const [critId, val] of Object.entries(ts.scores || {})) {
+          const numVal = Number(val);
+          if (numVal === 10) totalTens++;
+          if (numVal === 9) totalNines++;
+
           const crit = criteriaMap.get(critId);
           const w = crit ? (crit.weight ?? 1.0) : 1.0;
-          weightedTotal += (val * w);
+          rawWeightedTotal += (numVal * w);
         }
 
-        const normalizedJudgeScore = parseFloat((weightedTotal * weightMultiplier).toFixed(2));
+        const normalizedJudgeScore = rawWeightedTotal * weightMultiplier;
 
         return {
           judgeId: ts.judgeId,
           judgeName: judge ? judge.name : "Judge",
           totalScore: ts.totalScore,
-          weightedScore: normalizedJudgeScore,
+          weightedScore: parseFloat(normalizedJudgeScore.toFixed(2)),
+          rawWeightedScore: normalizedJudgeScore,
         };
       });
 
-      const averageScore = teamScores.length > 0
-        ? parseFloat(
-            (
-              judgeSubmissions.reduce((sum, s) => sum + (s.weightedScore || s.totalScore), 0) /
-              judgeSubmissions.length
-            ).toFixed(2)
-          )
+      // FULL UNROUNDED weighted score for primary ranking
+      const rawWeightedScore = judgeSubmissions.length > 0
+        ? judgeSubmissions.reduce((sum, s) => sum + (s.rawWeightedScore !== undefined ? s.rawWeightedScore : s.totalScore), 0) / judgeSubmissions.length
         : 0;
 
+      // Rounded weighted score for UI display
+      const averageScore = parseFloat(rawWeightedScore.toFixed(2));
+
+      // FULL UNROUNDED average score for secondary tiebreaker
       const rawAverageScore = teamScores.length > 0
-        ? parseFloat(
-            (
-              teamScores.reduce((sum, s) => sum + s.totalScore, 0) /
-              teamScores.length
-            ).toFixed(2)
-          )
+        ? teamScores.reduce((sum, s) => sum + s.totalScore, 0) / teamScores.length
         : 0;
 
       return {
         teamId: team.id,
         teamName: team.name,
         projectName: team.projectName,
+        tableNumber: team.tableNumber,
         averageScore,
+        rawWeightedScore,
         rawAverageScore,
+        perfectTensCount: totalTens,
+        ninesCount: totalNines,
         judgeSubmissions,
         eventId,
       };
     });
 
-    const sorted = entries.sort((a, b) => {
-      if (b.averageScore !== a.averageScore) {
-        return b.averageScore - a.averageScore;
+    // 4-Stage Deterministic Tiebreaker Comparator
+    const sorted = [...entries].sort((a, b) => {
+      // 1. Primary: FULL UNROUNDED weighted score (e.g. 82.504 > 82.499 even if display is 82.5)
+      const weightedDiff = b.rawWeightedScore - a.rawWeightedScore;
+      if (Math.abs(weightedDiff) > 1e-9) {
+        return weightedDiff;
       }
-      return (b.rawAverageScore || 0) - (a.rawAverageScore || 0);
+
+      // 2. Secondary tiebreaker: unweighted average score
+      const avgDiff = b.rawAverageScore - a.rawAverageScore;
+      if (Math.abs(avgDiff) > 1e-9) {
+        return avgDiff;
+      }
+
+      // 3. Third tiebreaker: number of perfect 10 ratings
+      const tensDiff = b.perfectTensCount - a.perfectTensCount;
+      if (tensDiff !== 0) {
+        return tensDiff;
+      }
+
+      // 4. Fourth tiebreaker: number of 9 ratings
+      const ninesDiff = b.ninesCount - a.ninesCount;
+      if (ninesDiff !== 0) {
+        return ninesDiff;
+      }
+
+      // Completely identical -> Tied
+      return 0;
     });
 
-    return sorted.map((entry, index) => ({
-      ...entry,
-      rank: index + 1,
-    }));
+    // Helper: test if two entries are identically tied across all 4 metrics
+    const areIdentical = (a: typeof entries[0], b: typeof entries[0]) => {
+      return (
+        Math.abs(a.rawWeightedScore - b.rawWeightedScore) <= 1e-9 &&
+        Math.abs(a.rawAverageScore - b.rawAverageScore) <= 1e-9 &&
+        a.perfectTensCount === b.perfectTensCount &&
+        a.ninesCount === b.ninesCount
+      );
+    };
+
+    // Calculate competition ranks (1, 2, 2, 4)
+    const rankedList: LeaderboardEntry[] = [];
+    const rankCounts: Record<number, number> = {};
+
+    for (let i = 0; i < sorted.length; i++) {
+      let rank = i + 1;
+      if (i > 0 && areIdentical(sorted[i], sorted[i - 1])) {
+        rank = rankedList[i - 1].rank;
+      }
+      rankCounts[rank] = (rankCounts[rank] || 0) + 1;
+      rankedList.push({
+        ...sorted[i],
+        rank,
+      });
+    }
+
+    const getOrdinal = (n: number): string => {
+      const s = ["TH", "ST", "ND", "RD"];
+      const v = n % 100;
+      return n + (s[(v - 20) % 10] || s[v] || s[0]);
+    };
+
+    // Annotate ties with displayRank and tieLabel
+    return rankedList.map((entry) => {
+      const isTie = rankCounts[entry.rank] > 1;
+      const tieLabel = isTie ? `TIED ${getOrdinal(entry.rank)}` : undefined;
+      const displayRank = isTie ? `TIED ${entry.rank}` : String(entry.rank);
+
+      return {
+        ...entry,
+        isTie,
+        tieLabel,
+        displayRank,
+      };
+    });
   } catch (error) {
     console.error("Neon DB Error (getLeaderboard):", error);
     return [];

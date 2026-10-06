@@ -2,49 +2,26 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { KeyRound, User, Radio, Cpu, BadgeCheck, Briefcase, Layers } from "lucide-react";
-import { getJudges, addJudge, initDatabase, verifyUserLogin, getEvents } from "@/lib/db";
-import { EventItem } from "@/lib/types";
+import { KeyRound, User, Radio, Cpu, BadgeCheck } from "lucide-react";
+import { initDatabase, verifyUserLogin } from "@/lib/db";
 import CyberInput from "@/components/CyberInput";
 import CyberButton from "@/components/CyberButton";
 
 export default function JudgeAuthPage() {
   const router = useRouter();
-  const [isLogin, setIsLogin] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [booting, setBooting] = useState(true);
 
-  // Events State
-  const [events, setEvents] = useState<EventItem[]>([]);
-  const [selectedEventId, setSelectedEventId] = useState<string>("default_event");
-
   // Form states
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [fullName, setFullName] = useState("");
-  const [designation, setDesignation] = useState("");
 
   useEffect(() => {
     initDatabase();
-    getEvents().then((evList) => {
-      if (evList && evList.length > 0) {
-        setEvents(evList);
-        setSelectedEventId(evList[0].id);
-      }
-    }).catch(console.error);
-
-    const timer = setTimeout(() => setBooting(false), 600);
+    const timer = setTimeout(() => setBooting(false), 500);
     return () => clearTimeout(timer);
   }, []);
-
-  const resetForm = () => {
-    setUsername("");
-    setPassword("");
-    setFullName("");
-    setDesignation("");
-    setError("");
-  };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,56 +30,21 @@ export default function JudgeAuthPage() {
 
     try {
       const usernameVal = username.trim().toLowerCase();
-
-      if (isLogin) {
-        // --- LOGIN ---
-        const authRes = await verifyUserLogin(usernameVal, password);
-        if (!authRes.success || !authRes.data) {
-          setError(authRes.error || "INVALID CREDENTIALS. ACCESS DENIED.");
-          setLoading(false);
-          return;
-        }
-        const matched = authRes.data;
-        sessionStorage.setItem("judge_session", JSON.stringify({
-          id: matched.id,
-          username: matched.username,
-          name: matched.name,
-          designation: matched.designation,
-          eventId: matched.eventId || selectedEventId || "default_event",
-        }));
-        router.push("/dashboard");
-
-      } else {
-        // --- REGISTER ---
-        if (!fullName.trim() || !designation.trim() || !usernameVal || !password) {
-          setError("ALL FIELDS ARE REQUIRED FOR REGISTRATION.");
-          setLoading(false);
-          return;
-        }
-        const res = await addJudge({
-          username: usernameVal,
-          name: fullName.trim(),
-          designation: designation.trim(),
-          password,
-          eventId: selectedEventId,
-        }, selectedEventId);
-
-        if (!res.success || !res.data) {
-          setError(res.error || "REGISTRATION FAILED.");
-          setLoading(false);
-          return;
-        }
-
-        const newJudge = res.data;
-        sessionStorage.setItem("judge_session", JSON.stringify({
-          id: newJudge.id,
-          username: newJudge.username,
-          name: newJudge.name,
-          designation: newJudge.designation,
-          eventId: newJudge.eventId || selectedEventId || "default_event",
-        }));
-        router.push("/dashboard");
+      const authRes = await verifyUserLogin(usernameVal, password);
+      if (!authRes.success || !authRes.data) {
+        setError(authRes.error || "INVALID CREDENTIALS. ACCESS DENIED.");
+        setLoading(false);
+        return;
       }
+      const matched = authRes.data;
+      sessionStorage.setItem("judge_session", JSON.stringify({
+        id: matched.id,
+        username: matched.username,
+        name: matched.name,
+        designation: matched.designation,
+        eventId: matched.eventId || "default_event",
+      }));
+      router.push("/dashboard");
     } catch (err: any) {
       setError(err?.message ? `ERROR: ${err.message.toUpperCase()}` : "TRANSMISSION ERROR: DATABASE DISCONNECTED.");
     } finally {
@@ -130,8 +72,6 @@ export default function JudgeAuthPage() {
     );
   }
 
-  const activeEvent = events.find((e) => e.id === selectedEventId) || events[0];
-
   return (
     <div className="min-h-screen flex flex-col justify-center items-center p-4 relative overflow-hidden">
       {/* Background neon blobs */}
@@ -146,73 +86,19 @@ export default function JudgeAuthPage() {
         <span className="absolute top-0 right-0 w-2 h-2 bg-cyber-cyan/30" />
         <span className="absolute bottom-0 left-0 w-2 h-2 bg-cyber-cyan/30" />
 
-        {/* Generic Event Selector */}
-        {events.length > 0 && (
-          <div className="flex flex-col gap-1 w-full bg-cyber-bg-darker/90 border border-cyber-cyan/30 p-2.5">
-            <div className="flex items-center justify-between">
-              <label htmlFor="portal-event-select" className="font-orbitron text-[10px] text-cyber-cyan font-bold tracking-widest uppercase flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-cyber-cyan" /> SELECT EVENT:
-              </label>
-              {activeEvent?.date && (
-                <span className="font-mono text-[9px] text-gray-400">{activeEvent.date}</span>
-              )}
-            </div>
-            <select
-              id="portal-event-select"
-              aria-label="Select Evaluation Event"
-              value={selectedEventId}
-              onChange={(e) => setSelectedEventId(e.target.value)}
-              className="bg-gray-900 border border-gray-700 text-white font-mono text-xs px-2.5 py-1.5 outline-none cursor-pointer w-full mt-1 font-semibold"
-            >
-              {events.map((ev) => (
-                <option key={ev.id} value={ev.id} className="bg-gray-900 text-white">
-                  {ev.name} {ev.organizer ? `[${ev.organizer}]` : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {/* Dynamic Portal Header with Event & Organizer Branding */}
+        {/* Dynamic Portal Header */}
         <div className="flex flex-col gap-2 text-center border-b border-cyber-cyan/15 pb-4">
           <div className="flex justify-center items-center gap-2">
             <Radio className="w-4 h-4 text-cyber-cyan animate-pulse" />
             <span className="font-mono text-xs text-cyber-cyan/90 tracking-widest font-bold uppercase truncate max-w-full">
-              {activeEvent?.name || "EVALUATION PORTAL"}
+              SECURE JURY ACCESS
             </span>
           </div>
 
-          {/* Event Logo & Organizer Logo (or clean generic badge fallback) */}
           <div className="flex justify-center items-center gap-3 my-1">
-            {activeEvent?.logo ? (
-              <div className="p-1.5 bg-black/40 border border-cyber-cyan/30 flex items-center justify-center">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={activeEvent.logo}
-                  alt={activeEvent.name}
-                  className="h-9 max-w-[120px] object-contain"
-                  onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
-                />
-              </div>
-            ) : null}
-
-            {activeEvent?.organizerLogo ? (
-              <div className="p-1.5 bg-black/40 border border-gray-700 flex items-center justify-center">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={activeEvent.organizerLogo}
-                  alt={activeEvent.organizer || "Organizer"}
-                  className="h-9 max-w-[120px] object-contain"
-                  onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
-                />
-              </div>
-            ) : null}
-
-            {!activeEvent?.logo && !activeEvent?.organizerLogo && (
-              <div className="p-2.5 bg-cyber-cyan/10 border border-cyber-cyan/30 text-cyber-cyan shadow-[0_0_12px_rgba(0,240,255,0.2)]">
-                <BadgeCheck className="w-6 h-6 animate-pulse" />
-              </div>
-            )}
+            <div className="p-2.5 bg-cyber-cyan/10 border border-cyber-cyan/30 text-cyber-cyan shadow-[0_0_12px_rgba(0,240,255,0.2)]">
+              <BadgeCheck className="w-6 h-6 animate-pulse" />
+            </div>
           </div>
 
           <h1 className="font-orbitron font-extrabold text-xl sm:text-2xl text-white tracking-widest text-glow-cyan">
@@ -220,75 +106,24 @@ export default function JudgeAuthPage() {
           </h1>
 
           <p className="font-sans text-[11px] text-gray-400 tracking-wider uppercase">
-            {activeEvent?.organizer ? `${activeEvent.organizer}` : ""}
-            {activeEvent?.organizer && activeEvent?.subtitle ? " • " : ""}
-            {activeEvent?.subtitle || (!activeEvent?.organizer ? "Multi-Event Evaluation Platform" : "")}
+            Authorized Evaluator Terminal • Multi-Event Platform
           </p>
         </div>
 
-        {/* Tab Switcher */}
-        <div className="flex w-full border border-cyber-cyan/30 font-orbitron text-xs">
-          <button
-            type="button"
-            className={`flex-1 py-2.5 transition-all duration-300 tracking-widest ${
-              isLogin
-                ? "bg-cyber-cyan text-black font-bold"
-                : "bg-transparent text-gray-400 hover:bg-cyber-cyan/10"
-            }`}
-            onClick={() => { setIsLogin(true); resetForm(); }}
-          >
-            AUTHORIZE
-          </button>
-          <button
-            type="button"
-            className={`flex-1 py-2.5 transition-all duration-300 tracking-widest ${
-              !isLogin
-                ? "bg-cyber-cyan text-black font-bold"
-                : "bg-transparent text-gray-400 hover:bg-cyber-cyan/10"
-            }`}
-            onClick={() => { setIsLogin(false); resetForm(); }}
-          >
-            REGISTER
-          </button>
+        {/* Security Notice */}
+        <div className="bg-cyber-bg-darker/80 border border-cyber-cyan/20 p-2.5 text-center">
+          <p className="text-[10px] font-mono text-cyber-cyan">
+            🔒 Enter your admin-assigned evaluator credentials to access your evaluation workspace.
+          </p>
         </div>
 
         {/* Auth Form */}
         <form onSubmit={handleAuth} className="flex flex-col gap-4">
-
-          {/* Register-only fields */}
-          {!isLogin && (
-            <>
-              <div className="relative">
-                <BadgeCheck className="absolute right-3 bottom-3 w-4 h-4 text-cyber-cyan/50" />
-                <CyberInput
-                  label="Full Name"
-                  placeholder="e.g. Dr. Sarah Connor"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  disabled={loading}
-                  required
-                />
-              </div>
-              <div className="relative">
-                <Briefcase className="absolute right-3 bottom-3 w-4 h-4 text-cyber-cyan/50" />
-                <CyberInput
-                  label="Designation / Institution"
-                  placeholder="e.g. Professor, CSE Dept"
-                  value={designation}
-                  onChange={(e) => setDesignation(e.target.value)}
-                  disabled={loading}
-                  required
-                />
-              </div>
-            </>
-          )}
-
-          {/* Shared fields */}
           <div className="relative">
             <User className="absolute right-3 bottom-3 w-4 h-4 text-cyber-cyan/50" />
             <CyberInput
               label="Judge ID / Username"
-              placeholder="e.g. sarah_c"
+              placeholder="e.g. judge1"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               disabled={loading}
@@ -318,16 +153,10 @@ export default function JudgeAuthPage() {
 
           <div className="flex flex-col gap-3 mt-2">
             <CyberButton type="submit" variant="cyan" fullWidth disabled={loading}>
-              {loading
-                ? "PROCESSING..."
-                : isLogin
-                ? "ESTABLISH CONNECTION"
-                : "INITIALIZE JURIST NODE"}
+              {loading ? "AUTHENTICATING..." : "ESTABLISH CONNECTION"}
             </CyberButton>
             <p className="text-[9px] text-center text-gray-500 font-mono">
-              {isLogin
-                ? "NEW JUDGE? SWITCH TO REGISTER TAB ABOVE"
-                : "ALREADY REGISTERED? SWITCH TO AUTHORIZE TAB ABOVE"}
+              EVENT ASSIGNMENT IS CONTROLLED BY PLATFORM ADMINS
             </p>
           </div>
         </form>

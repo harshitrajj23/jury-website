@@ -94,10 +94,10 @@ export interface LeaderboardEntry {
   projectName?: string;
   tableNumber?: number;
   averageScore: number; // weighted average score (displayed rounded)
-  rawWeightedScore?: number; // FULL UNROUNDED weighted score for primary ranking
-  rawAverageScore?: number; // unweighted average score for secondary tiebreaker
-  perfectTensCount?: number; // third tiebreaker: count of 10s
-  ninesCount?: number; // fourth tiebreaker: count of 9s
+  rawWeightedScore: number; // FULL UNROUNDED weighted score for primary ranking
+  rawAverageScore: number; // unweighted average score for secondary tiebreaker
+  perfectTensCount: number; // third tiebreaker: count of 10s
+  ninesCount: number; // fourth tiebreaker: count of 9s
   judgeSubmissions: {
     judgeId: string;
     judgeName: string;
