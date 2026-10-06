@@ -1,67 +1,77 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { useRouter } from "next/navigation";
 import { 
-  ShieldCheck, 
   Users, 
-  Layers, 
-  Download, 
-  Trash2, 
-  Plus, 
-  Lock, 
   Settings, 
-  Grid,
-  Radio,
-  RefreshCw,
-  AlertOctagon,
-  Key,
-  Save,
-  Trophy,
-  Clock
+  Trophy, 
+  LogOut, 
+  Trash2, 
+  Save, 
+  Radio, 
+  Grid, 
+  ListFilter, 
+  Download, 
+  Clock, 
+  AlertOctagon, 
+  KeyRound,
+  FileSpreadsheet,
+  Layers,
+  PlusCircle,
+  Edit3,
+  Calendar
 } from "lucide-react";
 import { 
   getJudges, 
-  addJudge, 
-  removeJudge, 
   getTeams, 
-  addTeam, 
-  removeTeam, 
   getScores, 
   getConfig, 
+  getLeaderboard,
+  addJudge, 
+  removeJudge, 
+  addTeam, 
+  removeTeam, 
+  toggleDisqualifyTeam, 
+  updateCriteria, 
   toggleAnnounceResults,
-  updateCriteria,
+  updateTimerDuration,
   resetDatabase,
   initDatabase,
-  getLeaderboard,
-  updateTimerDuration,
-  toggleDisqualifyTeam
+  getEvents,
+  createEvent,
+  updateEvent
 } from "@/lib/db";
-import { Judge, Team, ScoringCriteria, ScoreRecord, AppConfig, LeaderboardEntry } from "@/lib/types";
+import { Judge, Team, ScoringCriteria, ScoreRecord, LeaderboardEntry, EventItem } from "@/lib/types";
 import { useRealtimeSync } from "@/lib/useRealtimeSync";
 import CyberButton from "@/components/CyberButton";
 import CyberInput from "@/components/CyberInput";
 
-export default function AdminPage() {
-  const router = useRouter();
-
-  // Authentication State
+export default function AdminConsolePage() {
+  // Authentication & Security
   const [isAdmin, setIsAdmin] = useState(false);
-  const [adminUser, setAdminUser] = useState("");
   const [adminPass, setAdminPass] = useState("");
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
 
-  // App Database States
+  // Events State
+  const [events, setEvents] = useState<EventItem[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState<string>("default_event");
+  const [currentEvent, setCurrentEvent] = useState<EventItem | null>(null);
+
+  // App Database States (Event-scoped)
   const [judges, setJudges] = useState<Judge[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [scores, setScores] = useState<ScoreRecord[]>([]);
   const [criteria, setCriteria] = useState<ScoringCriteria[]>([]);
   const [announceResults, setAnnounceResults] = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
-  const [timerDuration, setTimerDuration] = useState(8); // in minutes
+  
+  // Timer State with dirty flag to prevent background poll clobbering
+  const [timerMinutes, setTimerMinutes] = useState(5);
+  const [timerInputStr, setTimerInputStr] = useState("5");
+  const isTimerDirtyRef = useRef(false);
 
-  // UI Tabs: 'overview' | 'judges' | 'teams' | 'criteria' | 'matrix' | 'system'
+  // UI Tabs: 'overview' | 'events' | 'judges' | 'teams' | 'criteria' | 'matrix' | 'leaderboard' | 'system'
   const [activeTab, setActiveTab] = useState("overview");
 
   // Dynamic Add Forms state
@@ -72,35 +82,51 @@ export default function AdminPage() {
   const [newTeamName, setNewTeamName] = useState("");
   const [newCriteriaName, setNewCriteriaName] = useState("");
 
+  // Event Creation / Editing state
+  const [newEventName, setNewEventName] = useState("");
+  const [newEventSubtitle, setNewEventSubtitle] = useState("");
+  const [newEventOrganizer, setNewEventOrganizer] = useState("");
+  const [newEventLogo, setNewEventLogo] = useState("");
+  const [newEventTimer, setNewEventTimer] = useState("5");
+
   // Loading indicator states
   const [dbLoading, setDbLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const isInitialLoadRef = useRef(true);
+  const selectedEventIdRef = useRef("default_event");
+
+  useEffect(() => {
+    selectedEventIdRef.current = selectedEventId;
+  }, [selectedEventId]);
 
   useEffect(() => {
     initDatabase();
-    // Check if already logged in from a previous session
     const session = sessionStorage.getItem("admin_session");
     if (session === "authorized") {
       setIsAdmin(true);
-      fetchDbData(false);
+      fetchDbData(selectedEventIdRef.current, false);
     } else {
       setDbLoading(false);
     }
   }, []);
 
-  const fetchDbData = async (isBackground = false) => {
+  const fetchDbData = async (eventId: string = selectedEventIdRef.current, isBackground = false) => {
     if (!isBackground && isInitialLoadRef.current) {
       setDbLoading(true);
     }
     try {
-      const [jList, tList, sList, config, lList] = await Promise.all([
-        getJudges(),
-        getTeams(),
-        getScores(),
-        getConfig(),
-        getLeaderboard(),
+      const [eventsList, jList, tList, sList, config, lList] = await Promise.all([
+        getEvents(),
+        getJudges(eventId),
+        getTeams(eventId),
+        getScores(eventId),
+        getConfig(eventId),
+        getLeaderboard(eventId),
       ]);
+
+      setEvents(eventsList || []);
+      const matchedEv = eventsList.find((e) => e.id === eventId) || config.event || null;
+      setCurrentEvent(matchedEv);
 
       setJudges(jList || []);
       setTeams(tList || []);
@@ -108,7 +134,14 @@ export default function AdminPage() {
       setCriteria(config?.criteriaList || []);
       setAnnounceResults(Boolean(config?.announceResults));
       setLeaderboard(lList || []);
-      setTimerDuration(Math.round((config?.timerDuration || 480) / 60));
+
+      const serverMins = Math.round((config?.timerDuration || 300) / 60);
+      setTimerMinutes(serverMins);
+      // Only sync input value if user is not actively editing it
+      if (!isTimerDirtyRef.current) {
+        setTimerInputStr(String(serverMins));
+      }
+
       isInitialLoadRef.current = false;
     } catch (err) {
       console.error("Transmission breakdown:", err);
@@ -117,30 +150,59 @@ export default function AdminPage() {
     }
   };
 
-  // Realtime WebSocket sync — auto-refresh silently when DB changes
+  // Realtime WebSocket sync scoped to current event
   const handleRealtimeChange = useCallback(() => {
     if (isAdmin) {
-      fetchDbData(true);
+      fetchDbData(selectedEventIdRef.current, true);
     }
   }, [isAdmin]);
 
   const realtimeStatus = useRealtimeSync({
-    tables: ["Score", "Team", "User", "Criteria", "Settings"],
+    tables: ["Score", "Team", "User", "Criteria", "Settings", "Event"],
+    eventId: selectedEventId,
     onDataChange: handleRealtimeChange,
     enabled: isAdmin,
     intervalMs: 20000,
   });
 
+  const handleEventSwitch = (newId: string) => {
+    setSelectedEventId(newId);
+    selectedEventIdRef.current = newId;
+    isTimerDirtyRef.current = false;
+    fetchDbData(newId, false);
+  };
+
+  // ==============================================================
+  // TIMER HANDLERS (REQUIREMENT 3 FIX)
+  // ==============================================================
+  const handleTimerInputChange = (val: string) => {
+    isTimerDirtyRef.current = true;
+    setTimerInputStr(val);
+  };
+
+  const handleTimerPreset = (mins: number) => {
+    isTimerDirtyRef.current = true;
+    setTimerInputStr(String(mins));
+  };
+
   const handleSaveTimer = async () => {
+    const mins = parseInt(timerInputStr.trim(), 10);
+    if (isNaN(mins) || mins < 1 || mins > 60) {
+      alert("FAIL: PRESENTATION TIME LIMIT MUST BE AN INTEGER BETWEEN 1 AND 60 MINUTES.");
+      return;
+    }
+
     setActionLoading(true);
     try {
-      const res = await updateTimerDuration(timerDuration * 60); // convert minutes to seconds
+      const res = await updateTimerDuration(mins * 60, selectedEventId);
       if (!res.success) {
         alert(`FAIL: TIMER SETTING TRANSMISSION FAILURE.\n\n${res.error}`);
         return;
       }
-      alert(`SYSTEM STATUS: TIME LIMIT SET TO ${timerDuration} MINUTES.`);
-      await fetchDbData(false);
+      setTimerMinutes(mins);
+      isTimerDirtyRef.current = false;
+      alert(`SYSTEM STATUS: TIME LIMIT SET TO ${mins} MINUTES FOR ${currentEvent?.name || "SELECTED EVENT"}.`);
+      await fetchDbData(selectedEventId, false);
     } catch (err: any) {
       alert(`FAIL: TIMER SETTING TRANSMISSION FAILURE. (${err?.message || "Database error"})`);
     } finally {
@@ -148,6 +210,9 @@ export default function AdminPage() {
     }
   };
 
+  // ==============================================================
+  // AUTHENTICATION
+  // ==============================================================
   const handleAdminLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setAuthLoading(true);
@@ -163,7 +228,7 @@ export default function AdminPage() {
 
     sessionStorage.setItem("admin_session", "authorized");
     setIsAdmin(true);
-    fetchDbData(false);
+    fetchDbData(selectedEventId, false);
     setAuthLoading(false);
   };
 
@@ -172,7 +237,44 @@ export default function AdminPage() {
     setIsAdmin(false);
   };
 
-  // Add Dynamic Judge
+  // ==============================================================
+  // EVENT MANAGEMENT
+  // ==============================================================
+  const handleCreateEvent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newEventName.trim()) return;
+    setActionLoading(true);
+    try {
+      const mins = parseInt(newEventTimer, 10) || 5;
+      const res = await createEvent({
+        name: newEventName.trim(),
+        subtitle: newEventSubtitle.trim(),
+        organizer: newEventOrganizer.trim(),
+        logo: newEventLogo.trim() || "/pals-logo.svg",
+        timerDuration: mins * 60,
+      });
+
+      if (!res.success || !res.data) {
+        alert(`FAIL: EVENT CREATION FAILED.\n\n${res.error}`);
+        return;
+      }
+
+      setNewEventName("");
+      setNewEventSubtitle("");
+      setNewEventOrganizer("");
+      setNewEventLogo("");
+      alert(`✅ EVENT "${res.data.name}" CREATED SUCCESSFULLY.`);
+      handleEventSwitch(res.data.id);
+    } catch (err: any) {
+      alert(`FAIL: EVENT CREATION ERROR: ${err?.message || "Database error"}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // ==============================================================
+  // JUDGES & TEAMS MANAGEMENT
+  // ==============================================================
   const handleAddJudge = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newJudgeName || !newJudgeDesg || !newJudgeUser || !newJudgePass) return;
@@ -183,57 +285,56 @@ export default function AdminPage() {
         name: newJudgeName,
         designation: newJudgeDesg,
         password: newJudgePass,
-      });
+        eventId: selectedEventId,
+      }, selectedEventId);
+
       if (!res.success) {
         alert(`FAIL: JUDGE REGISTRATION REJECTED.\n\n${res.error}`);
         return;
       }
-      // Reset inputs
       setNewJudgeName("");
       setNewJudgeDesg("");
       setNewJudgeUser("");
       setNewJudgePass("");
-      await fetchDbData(false);
-      alert("✅ JUDGE REGISTERED SUCCESSFULLY.");
+      await fetchDbData(selectedEventId, false);
+      alert("✅ JUDGE REGISTERED SUCCESSFULLY FOR CURRENT EVENT.");
     } catch (err: any) {
-      alert(`FAIL: JUDGE REGISTRATION REJECTED. (${err?.message || "Database connection error"})`);
+      alert(`FAIL: JUDGE REGISTRATION REJECTED. (${err?.message || "Database error"})`);
     } finally {
       setActionLoading(false);
     }
   };
 
-  // Remove Judge
   const handleRemoveJudge = async (id: string) => {
     if (!confirm("WARNING: ALL SCORES SUBMITTED BY THIS JUDGE WILL BE ERASED. PROCEED?")) return;
     setActionLoading(true);
     try {
       const res = await removeJudge(id);
       if (!res.success) {
-        alert(`FAIL: TRANSACTION DELETION ABORTED.\n\n${res.error}`);
+        alert(`FAIL: JUDGE DELETION ABORTED.\n\n${res.error}`);
         return;
       }
-      await fetchDbData(false);
+      await fetchDbData(selectedEventId, false);
     } catch (err: any) {
-      alert(`FAIL: TRANSACTION DELETION ABORTED. (${err?.message || "Database error"})`);
+      alert(`FAIL: JUDGE DELETION ABORTED. (${err?.message || "Database error"})`);
     } finally {
       setActionLoading(false);
     }
   };
 
-  // Add Dynamic Team
   const handleAddTeam = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTeamName.trim()) return;
     setActionLoading(true);
     try {
-      const res = await addTeam(newTeamName.trim());
+      const res = await addTeam(newTeamName.trim(), selectedEventId);
       if (!res.success) {
         alert(`FAIL: TEAM REGISTRATION REJECTED.\n\n${res.error}`);
         return;
       }
       setNewTeamName("");
-      await fetchDbData(false);
-      alert("✅ TEAM REGISTERED SUCCESSFULLY.");
+      await fetchDbData(selectedEventId, false);
+      alert("✅ TEAM REGISTERED SUCCESSFULLY FOR CURRENT EVENT.");
     } catch (err: any) {
       alert(`FAIL: TEAM REGISTRATION REJECTED. (${err?.message || "Database error"})`);
     } finally {
@@ -241,9 +342,8 @@ export default function AdminPage() {
     }
   };
 
-  // Remove Team
   const handleRemoveTeam = async (id: string) => {
-    if (!confirm("WARNING: REMOVING THIS TEAM WILL DELETE ALL RECEIVED JUDGING SCORINGS. CONTINUANCE?")) return;
+    if (!confirm("WARNING: REMOVING THIS TEAM WILL DELETE ALL RECEIVED JUDGING SCORES. PROCEED?")) return;
     setActionLoading(true);
     try {
       const res = await removeTeam(id);
@@ -251,7 +351,7 @@ export default function AdminPage() {
         alert(`FAIL: TEAM ELIMINATION FAILED.\n\n${res.error}`);
         return;
       }
-      await fetchDbData(false);
+      await fetchDbData(selectedEventId, false);
     } catch (err: any) {
       alert(`FAIL: TEAM ELIMINATION FAILED. (${err?.message || "Database error"})`);
     } finally {
@@ -268,7 +368,7 @@ export default function AdminPage() {
         alert(`FAIL: TEAM DISQUALIFICATION STATE TOGGLE FAILED.\n\n${res.error}`);
         return;
       }
-      await fetchDbData(false);
+      await fetchDbData(selectedEventId, false);
     } catch (err: any) {
       alert(`FAIL: TEAM DISQUALIFICATION STATE TOGGLE FAILED. (${err?.message || "Database error"})`);
     } finally {
@@ -276,8 +376,10 @@ export default function AdminPage() {
     }
   };
 
-  // Renaming/Editing criteria dynamically
-  const handleCriteriaChange = async (index: number, newName: string) => {
+  // ==============================================================
+  // CRITERIA MANAGEMENT
+  // ==============================================================
+  const handleCriteriaChange = (index: number, newName: string) => {
     const updated = [...criteria];
     updated[index].name = newName;
     setCriteria(updated);
@@ -288,16 +390,16 @@ export default function AdminPage() {
       alert("FAIL: AT LEAST ONE SCORING CRITERION MUST PERSIST.");
       return;
     }
-    const filtered = criteria.filter((c) => c.id !== id);
-    setCriteria(filtered);
+    setCriteria((prev) => prev.filter((c) => c.id !== id));
   };
 
   const handleAddCriteria = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCriteriaName.trim()) return;
     const newCriteria: ScoringCriteria = {
-      id: `c_${Date.now()}`,
+      id: `c_${selectedEventId}_${Date.now()}`,
       name: newCriteriaName.trim(),
+      eventId: selectedEventId,
     };
     setCriteria((prev) => [...prev, newCriteria]);
     setNewCriteriaName("");
@@ -306,12 +408,12 @@ export default function AdminPage() {
   const handleSaveCriteria = async () => {
     setActionLoading(true);
     try {
-      const res = await updateCriteria(criteria);
+      const res = await updateCriteria(criteria, selectedEventId);
       if (!res.success) {
         alert(`FAIL: CONFIG TRANSMISSION FAILURE.\n\n${res.error}`);
         return;
       }
-      alert("SYSTEM STATUS: SCORING PARAMETERS UPDATED.");
+      alert("SYSTEM STATUS: SCORING PARAMETERS UPDATED FOR CURRENT EVENT.");
     } catch (err: any) {
       alert(`FAIL: CONFIG TRANSMISSION FAILURE. (${err?.message || "Database error"})`);
     } finally {
@@ -319,12 +421,14 @@ export default function AdminPage() {
     }
   };
 
-  // Toggle Results Announcement
+  // ==============================================================
+  // BROADCAST & SYSTEM RESET
+  // ==============================================================
   const handleToggleBroadcast = async () => {
     setActionLoading(true);
     try {
       const nextState = !announceResults;
-      const res = await toggleAnnounceResults(nextState);
+      const res = await toggleAnnounceResults(nextState, selectedEventId);
       if (!res.success) {
         alert(`FAIL: BROADCAST TOGGLE FAULT.\n\n${res.error}`);
         return;
@@ -337,331 +441,410 @@ export default function AdminPage() {
     }
   };
 
-  // Factory reset
   const handleFactoryReset = async () => {
-    if (!confirm("🚨 DESTROY ALL DATA? THIS WILL ERASE ALL JUDGES, TEAMS, CONFIGS, AND RATINGS RECORDED. THIS ACTION CANNOT BE UNDONE.")) return;
+    if (!confirm(`🚨 RESET SCORES FOR "${currentEvent?.name || "SELECTED EVENT"}"? THIS WILL ERASE ALL SCORES SUBMITTED FOR THIS EVENT ONLY. PROCEED?`)) return;
     setActionLoading(true);
     try {
-      const res = await resetDatabase();
+      const res = await resetDatabase(selectedEventId);
       if (!res.success) {
-        alert(`FAIL: DECONSTRUCT TRIGGER REJECTED.\n\n${res.error}`);
+        alert(`FAIL: RESET TRIGGER REJECTED.\n\n${res.error}`);
         return;
       }
-      await fetchDbData(false);
-      alert("DATABASE RE-MOUNTED TO FACTORY DEFAULTS.");
+      await fetchDbData(selectedEventId, false);
+      alert("✅ EVENT EVALUATIONS RESET SUCCESSFULLY.");
     } catch (err: any) {
-      alert(`FAIL: DECONSTRUCT TRIGGER REJECTED. (${err?.message || "Database error"})`);
+      alert(`FAIL: RESET ERROR (${err?.message || "Database error"})`);
     } finally {
       setActionLoading(false);
     }
   };
 
-  // Client-Side Dynamic CSV compilation and Download
+  // ==============================================================
+  // CSV EXPORT (EVENT SCOPED)
+  // ==============================================================
   const handleExportCSV = () => {
     if (teams.length === 0) return;
 
-    // Headers: Team Name, Judge 1, Judge 2, ..., Average Total
-    let csvContent = "data:text/csv;charset=utf-8,";
-    
-    // Header Row
-    const judgeHeaders = judges.map((j) => `"${j.name} (${j.designation})"`).join(",");
-    csvContent += `Team Name,${judgeHeaders},Average Score\n`;
+    const headers = [
+      "Team ID",
+      "Team Name",
+      "Project Name",
+      "Event ID",
+      ...judges.map((j) => `${j.name} (${j.email || j.username})`),
+      "Raw Average Score",
+      "Weighted Average Score"
+    ];
 
-    // Data Rows
-    teams.forEach((t) => {
-      const teamScores = scores.filter((s) => s.teamId === t.id);
-      const rowScores = judges.map((j) => {
-        const match = teamScores.find((s) => s.judgeId === j.id);
-        return match ? match.totalScore : ""; // blank if not scored
-      });
+    const rows = teams.map((team) => {
+      const teamScores = scores.filter((s) => s.teamId === team.id);
       
-      const averageScore = teamScores.length > 0
-        ? parseFloat((teamScores.reduce((sum, s) => sum + s.totalScore, 0) / teamScores.length).toFixed(2))
-        : 0;
+      const judgeCols = judges.map((j) => {
+        const found = teamScores.find((s) => s.judgeId === j.id);
+        return found ? found.totalScore : "NOT_SCORED";
+      });
 
-      const row = `"${t.name}",${rowScores.join(",")},${averageScore}`;
-      csvContent += row + "\n";
+      const lbEntry = leaderboard.find((l) => l.teamId === team.id);
+
+      return [
+        `"${team.id}"`,
+        `"${team.name}"`,
+        `"${team.projectName || team.name}"`,
+        `"${selectedEventId}"`,
+        ...judgeCols,
+        lbEntry?.rawAverageScore ?? "0",
+        lbEntry?.averageScore ?? "0"
+      ].join(",");
     });
 
-    const encodedUri = encodeURI(csvContent);
+    const csvContent = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `SCORESPHERE_Evaluation_Results_${Date.now()}.csv`);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `jury_matrix_${selectedEventId}_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  // Calculate telemetry counts
-  const expectedScoresCount = judges.length * teams.length;
-  const submittedScoresCount = scores.length;
-  const telemetryProgressPercent = expectedScoresCount > 0 
-    ? Math.round((submittedScoresCount / expectedScoresCount) * 100) 
-    : 0;
-
-  // Render Login state
+  // ==============================================================
+  // LOGIN SCREEN
+  // ==============================================================
   if (!isAdmin) {
     return (
-      <div className="min-h-screen flex flex-col justify-center items-center p-4 relative overflow-hidden bg-cyber-bg">
-        {/* Background glow overlay */}
-        <div className="absolute w-[300px] h-[300px] bg-cyber-magenta/5 rounded-full blur-[100px] top-[10%] left-[20%] pointer-events-none" />
+      <div className="min-h-screen flex flex-col justify-center items-center p-4 relative font-mono">
+        <div className="w-full max-w-md cyber-glass p-8 border border-cyber-magenta/30 flex flex-col gap-6 relative">
+          <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-cyber-magenta" />
+          <span className="absolute bottom-0 left-0 w-2.5 h-2.5 bg-cyber-magenta" />
 
-        <div className="w-full max-w-md cyber-glass-magenta p-8 border border-cyber-magenta/25 relative flex flex-col gap-6">
-          <span className="absolute top-0 left-0 w-2 h-2 bg-cyber-magenta" />
-          <span className="absolute bottom-0 right-0 w-2 h-2 bg-cyber-magenta" />
-
-          <div className="flex flex-col gap-1 text-center border-b border-cyber-magenta/15 pb-4">
-            <div className="flex justify-center items-center gap-2 mb-1.5">
-              <ShieldCheck className="w-5 h-5 text-cyber-magenta animate-pulse" />
-              <span className="font-mono text-xs text-cyber-magenta/80 tracking-widest font-bold uppercase">
-                SCORESPHERE - CENTRAL SYSTEM
-              </span>
-            </div>
-            <h1 className="font-orbitron font-extrabold text-2xl text-white tracking-widest text-glow-magenta">
-              ADMIN CONTROL
+          <div className="text-center border-b border-cyber-magenta/15 pb-4">
+            <h1 className="font-orbitron font-extrabold text-xl text-white tracking-widest text-glow-magenta uppercase">
+              MASTER CONTROL TERMINAL
             </h1>
-            <p className="font-sans text-[10px] text-gray-500 tracking-wider uppercase mt-1">
-              PROTECTED SECURE BACKEND NODE
+            <p className="text-[10px] text-gray-500 uppercase mt-1">
+              AUTHORIZED PERSONNEL ONLY • ACCESS KEY ENCRYPTED
             </p>
           </div>
 
-          <form onSubmit={handleAdminLogin} className="flex flex-col gap-5">
-            <CyberInput
-              variant="magenta"
-              label="ADMIN PASSWORD"
-              type="password"
-              placeholder="••••••••"
-              value={adminPass}
-              onChange={(e) => setAdminPass(e.target.value)}
-              disabled={authLoading}
-              required
-            />
+          <form onSubmit={handleAdminLogin} className="flex flex-col gap-4">
+            <div className="relative">
+              <KeyRound className="absolute right-3 bottom-3 w-4 h-4 text-cyber-magenta/50" />
+              <CyberInput
+                variant="magenta"
+                label="ADMIN SECURITY KEY"
+                type="password"
+                placeholder="••••••••"
+                value={adminPass}
+                onChange={(e) => setAdminPass(e.target.value)}
+                disabled={authLoading}
+                required
+              />
+            </div>
 
             {authError && (
-              <div className="bg-cyber-red/10 border border-cyber-red/30 px-3.5 py-2.5 font-mono text-xs text-cyber-red">
-                ⚡ AUTH_FAULT: {authError}
+              <div className="bg-cyber-red/10 border border-cyber-red/30 p-2.5 text-xs text-cyber-red font-bold">
+                ⚠️ {authError}
               </div>
             )}
 
-            <div className="flex flex-col gap-3 mt-2">
-              <CyberButton
-                type="submit"
-                variant="magenta"
-                fullWidth
-                disabled={authLoading}
-              >
-                {authLoading ? "DECRYPTING NODE..." : "INITIALIZE MASTER ACCESS"}
-              </CyberButton>
-            </div>
+            <CyberButton type="submit" variant="magenta" fullWidth disabled={authLoading}>
+              {authLoading ? "VALIDATING CODES..." : "AUTHENTICATE"}
+            </CyberButton>
           </form>
         </div>
-        <footer className="mt-8 text-center text-[10px] text-gray-600 font-mono tracking-widest uppercase">
-          SECURE PROTOCOL CLOUD INTEGRATED • SCORESPHERE © 2026
-        </footer>
       </div>
     );
   }
 
-  // Render Dashboard loading state
-  if (dbLoading) {
-    return (
-      <div className="min-h-screen bg-cyber-bg flex justify-center items-center font-mono text-cyber-magenta">
-        <div className="flex flex-col items-center gap-3">
-          <RefreshCw className="w-10 h-10 animate-spin" />
-          <p className="font-orbitron tracking-widest text-sm uppercase">COMPILING MASTER DATA MATRIX...</p>
-        </div>
-      </div>
-    );
-  }
-
+  // ==============================================================
+  // MAIN ADMIN DASHBOARD
+  // ==============================================================
   return (
-    <div className="min-h-screen flex flex-col relative pb-12">
-      {/* Header section */}
-      <header className="border-b border-cyber-magenta/15 bg-cyber-bg-darker/95 backdrop-blur-md sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <span className="p-2 bg-cyber-magenta/10 text-cyber-magenta border border-cyber-magenta/25">
-              <Settings className="w-5 h-5 animate-spin" />
-            </span>
-            <div>
-              <h1 className="font-orbitron font-extrabold text-lg text-white tracking-widest text-glow-magenta uppercase">
-                SCORESPHERE ADMIN CONSOLE
+    <div className="min-h-screen flex flex-col relative pb-12 font-sans overflow-x-hidden">
+      {/* Header */}
+      <header className="border-b border-cyber-magenta/20 bg-cyber-bg-darker/95 backdrop-blur-md sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          
+          {/* Left: Branding & Event Dropdown */}
+          <div className="flex items-center gap-3 min-w-0">
+            {currentEvent?.logo ? (
+              <div className="p-1 bg-black/40 border border-cyber-magenta/30 flex items-center justify-center shrink-0">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img 
+                  src={currentEvent.logo} 
+                  alt={currentEvent.name} 
+                  className="h-8 max-w-[110px] object-contain"
+                  onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                />
+              </div>
+            ) : (
+              <span className="p-2 bg-cyber-magenta/10 text-cyber-magenta border border-cyber-magenta/30 shrink-0">
+                <Settings className="w-5 h-5 animate-spin" />
+              </span>
+            )}
+
+            <div className="min-w-0">
+              <h1 className="font-orbitron font-extrabold text-base sm:text-lg text-white tracking-widest text-glow-magenta uppercase truncate">
+                MASTER ADMIN CONTROL
               </h1>
-              <div className="flex items-center gap-2 mt-0.5 font-mono text-[9px] text-cyber-magenta tracking-wider">
-                <span className={`w-1.5 h-1.5 rounded-full ${realtimeStatus === "connected" ? "bg-cyber-green animate-ping" : realtimeStatus === "connecting" ? "bg-cyber-yellow animate-pulse" : "bg-cyber-red"}`} />
-                {realtimeStatus === "connected" ? "⚡ LIVE SYNC" : realtimeStatus === "connecting" ? "SYNCING..." : "OFFLINE"} • ROOT_SESSION_ACTIVE
+              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${realtimeStatus === "connected" ? "bg-cyber-green animate-ping" : "bg-cyber-yellow"}`} />
+                <span className="font-mono text-[9px] text-cyber-magenta tracking-wider">
+                  {realtimeStatus === "connected" ? "⚡ REALTIME SSE ACTIVE" : "POLLING"} • EVENT: {currentEvent?.name?.toUpperCase() || selectedEventId.toUpperCase()}
+                </span>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-3 flex-wrap">
-            <CyberButton
-              variant={announceResults ? "red" : "green"}
-              size="sm"
-              onClick={handleToggleBroadcast}
-              disabled={actionLoading}
-              className="flex items-center gap-1.5"
-            >
-              {announceResults ? "🔐 LOCK RESULTS" : "📢 PUBLISH RESULTS"}
-            </CyberButton>
-
-            <CyberButton
-              variant="magenta"
-              size="sm"
-              onClick={() => router.push("/results")}
-              className="flex items-center gap-1.5"
-            >
-              🏆 LEADERBOARD
-            </CyberButton>
-
-            <CyberButton
-              variant="magenta"
-              size="sm"
-              onClick={() => fetchDbData(false)}
-              className="flex items-center gap-1.5"
-            >
-              <RefreshCw className="w-3.5 h-3.5" /> REFRESH
-            </CyberButton>
+          {/* Right: Event Switcher Selector & Logout */}
+          <div className="flex items-center gap-2.5 flex-wrap justify-between md:justify-end">
+            {/* Event Selector Dropdown */}
+            <div className="flex items-center gap-1.5 bg-cyber-bg-darker border border-cyber-magenta/30 px-2.5 py-1 text-xs font-mono">
+              <Layers className="w-3.5 h-3.5 text-cyber-magenta shrink-0" />
+              <label htmlFor="admin-event-select" className="sr-only">Scope Event</label>
+              <select
+                id="admin-event-select"
+                aria-label="Scope Event"
+                value={selectedEventId}
+                onChange={(e) => handleEventSwitch(e.target.value)}
+                disabled={actionLoading}
+                className="bg-transparent text-gray-200 outline-none cursor-pointer pr-1 text-xs font-bold"
+              >
+                {events.map((ev) => (
+                  <option key={ev.id} value={ev.id} className="bg-gray-900 text-white">
+                    {ev.name}
+                  </option>
+                ))}
+              </select>
+            </div>
 
             <CyberButton
               variant="red"
               size="sm"
               onClick={handleAdminLogout}
-              className="flex items-center gap-1.5"
+              className="flex items-center gap-1.5 shrink-0"
             >
-              <Key className="w-3.5 h-3.5" /> DE-AUTHORIZE
+              <LogOut className="w-3.5 h-3.5" /> EXIT SESSION
             </CyberButton>
           </div>
         </div>
       </header>
 
-      {/* Main Body */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 mt-8 flex-grow grid grid-cols-1 lg:grid-cols-12 gap-8">
+      {/* Main Workspace */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 mt-6 flex-grow flex flex-col gap-6 w-full">
         
-        {/* Navigation Tabs list (Col 1-3) */}
-        <section className="lg:col-span-3 flex flex-col gap-2">
+        {/* Navigation Tabs Bar */}
+        <div className="flex border-b border-cyber-magenta/20 overflow-x-auto gap-1 pb-1 font-orbitron text-xs">
           {[
-            { id: "overview", label: "📊 MASTER OVERVIEW", icon: <Grid className="w-4 h-4" /> },
-            { id: "judges", label: "👥 JUDGES TELEMETRY", icon: <Users className="w-4 h-4" /> },
-            { id: "teams", label: "📂 TEAM DIRECTORIES", icon: <Layers className="w-4 h-4" /> },
-            { id: "criteria", label: "⚙️ SCORING PARAMETERS", icon: <Settings className="w-4 h-4" /> },
-            { id: "leaderboard", label: "🏆 LEADERBOARD FEED", icon: <Trophy className="w-4 h-4" /> },
-            { id: "matrix", label: "🧮 MASTER MATRIX", icon: <Radio className="w-4 h-4" /> },
-            { id: "system", label: "🚨 BROADCAST & REBOOT", icon: <Radio className="w-4 h-4" /> },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`
-                w-full text-left p-3.5 font-orbitron font-bold text-xs tracking-wider transition-all duration-300 flex items-center gap-3 border
-                ${activeTab === tab.id
-                  ? "bg-cyber-magenta/15 border-l-4 border-cyber-magenta text-white shadow-[0_0_12px_rgba(217,70,239,0.15)]"
-                  : "bg-cyber-bg-darker/60 hover:bg-cyber-magenta/5 border-l-2 border-gray-800 text-gray-400 hover:text-gray-200"
-                }
-              `}
-            >
-              {tab.icon}
-              {tab.label}
-            </button>
-          ))}
-        </section>
+            { id: "overview", label: "OVERVIEW", icon: Grid },
+            { id: "events", label: "EVENTS", icon: Layers },
+            { id: "judges", label: `JUDGES (${judges.length})`, icon: Users },
+            { id: "teams", label: `TEAMS (${teams.length})`, icon: Trophy },
+            { id: "criteria", label: `CRITERIA (${criteria.length})`, icon: ListFilter },
+            { id: "matrix", label: "MATRIX SPREADSHEET", icon: FileSpreadsheet },
+            { id: "leaderboard", label: "LEADERBOARD", icon: Trophy },
+            { id: "system", label: "SYSTEM & TIMER", icon: Settings },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`
+                  flex items-center gap-2 px-3.5 py-2.5 tracking-wider uppercase transition-all duration-200 border-b-2 whitespace-nowrap
+                  ${isActive 
+                    ? "border-cyber-magenta bg-cyber-magenta/15 text-white font-bold" 
+                    : "border-transparent text-gray-400 hover:text-gray-200 hover:bg-cyber-magenta/5"
+                  }
+                `}
+              >
+                <Icon className="w-3.5 h-3.5" /> {tab.label}
+              </button>
+            );
+          })}
+        </div>
 
-        {/* Dynamic Display Area (Col 4-12) */}
-        <section className="lg:col-span-9 flex flex-col gap-6">
-          
-          {/* TAB 1: OVERVIEW */}
-          {activeTab === "overview" && (
-            <div className="flex flex-col gap-6">
-              {/* Telemetry diagnostics counts */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="cyber-glass border border-cyber-magenta/15 p-5 flex flex-col gap-2 relative">
-                  <span className="absolute top-0 right-0 w-2 h-2 bg-cyber-magenta" />
-                  <span className="font-mono text-[9px] text-gray-500 uppercase">ACTIVE EVALUATING JURISTS</span>
-                  <div className="flex items-baseline gap-2 mt-1">
-                    <span className="font-orbitron font-extrabold text-3xl text-white text-glow-magenta">{judges.length}</span>
-                    <span className="text-xs text-gray-500 font-mono uppercase">ONLINE REGISTERED</span>
-                  </div>
-                </div>
-
-                <div className="cyber-glass border border-cyber-magenta/15 p-5 flex flex-col gap-2 relative">
-                  <span className="absolute top-0 right-0 w-2 h-2 bg-cyber-magenta" />
-                  <span className="font-mono text-[9px] text-gray-500 uppercase">DYNAMIC TEAM PROTOTYPES</span>
-                  <div className="flex items-baseline gap-2 mt-1">
-                    <span className="font-orbitron font-extrabold text-3xl text-white text-glow-magenta">{teams.length}</span>
-                    <span className="text-xs text-gray-500 font-mono uppercase">QUEUED IN MATRIX</span>
-                  </div>
-                </div>
-
-                <div className="cyber-glass border border-cyber-magenta/15 p-5 flex flex-col gap-2 relative">
-                  <span className="absolute top-0 right-0 w-2 h-2 bg-cyber-magenta" />
-                  <span className="font-mono text-[9px] text-gray-500 uppercase">TABULATION COMPLETION DIAGNOSTIC</span>
-                  <div className="flex items-baseline gap-2 mt-1">
-                    <span className="font-orbitron font-extrabold text-3xl text-white text-glow-magenta">{telemetryProgressPercent}%</span>
-                    <span className="text-xs text-gray-500 font-mono uppercase">{submittedScoresCount}/{expectedScoresCount} SCOREFILES</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Progress bar visualizer */}
-              <div className="cyber-glass border border-cyber-magenta/15 p-6 flex flex-col gap-3">
-                <div className="flex justify-between font-mono text-[10px] text-gray-400">
-                  <span className="uppercase tracking-widest text-cyber-magenta font-bold">📡 CORE SYNCHRONIZER METRIC STATUS</span>
-                  <span>{telemetryProgressPercent}% PROGRESS</span>
-                </div>
-                <div className="w-full bg-gray-950 h-3 border border-white/5 relative overflow-hidden">
-                  <div 
-                    className="h-full absolute left-0 top-0 bg-cyber-magenta transition-all duration-500"
-                    style={{ width: `${telemetryProgressPercent}%` }}
-                  />
-                </div>
-                <p className="text-[10px] text-gray-500 font-mono leading-relaxed mt-1 uppercase">
-                  ⚡ STATUS: {telemetryProgressPercent === 100 ? "EVALUATION COMPLETE. BROADCAST STAGE CLEAR." : "WAITING FOR ACTIVE EVALUATION LOGS BY JURISTS..."}
-                </p>
-              </div>
-
-              {/* Leaderboard status */}
-              <div className="cyber-glass border border-cyber-magenta/15 p-6 flex flex-col gap-3">
-                <h3 className="font-orbitron text-xs font-bold text-cyber-magenta uppercase border-b border-cyber-magenta/15 pb-2 mb-2 tracking-wide">
-                  LEADERBOARD DISCLOSURE CONTROL
-                </h3>
-                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
-                  <div className="flex items-center gap-3">
-                    <span className={`w-3.5 h-3.5 rounded-full ${announceResults ? "bg-cyber-green animate-pulse" : "bg-cyber-red"}`} />
-                    <span className="font-mono text-sm text-gray-300 font-bold uppercase">
-                      PUBLIC LEADERBOARD: {announceResults ? "📢 TRANSMITTING ACTIVE" : "🔐 ENCRYPTED BLOCKADE"}
-                    </span>
-                  </div>
-                  <CyberButton
-                    variant={announceResults ? "red" : "green"}
-                    size="sm"
-                    onClick={handleToggleBroadcast}
-                    disabled={actionLoading}
-                  >
-                    {announceResults ? "DE-ACTIVATE BROADCAST" : "ACTIVATE PUBLIC BROADCAST"}
-                  </CyberButton>
-                </div>
-              </div>
+        {/* ============================================================== */}
+        {/* TAB 1: OVERVIEW                                                */}
+        {/* ============================================================== */}
+        {activeTab === "overview" && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="cyber-glass border border-cyber-magenta/20 p-5 flex flex-col gap-1">
+              <span className="text-[10px] font-mono text-gray-400 uppercase">ACTIVE EVENT</span>
+              <span className="font-orbitron font-extrabold text-base text-cyber-magenta truncate">
+                {currentEvent?.name || "DEFAULT EVENT"}
+              </span>
+              <span className="text-[9px] font-mono text-gray-500">ID: {selectedEventId}</span>
             </div>
-          )}
 
-          {/* TAB 2: JUDGES MANAGEMENT */}
-          {activeTab === "judges" && (
-            <div className="cyber-glass border border-cyber-magenta/15 p-6 flex flex-col gap-6">
-              <h3 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase border-b border-cyber-magenta/15 pb-2.5">
-                👥 JURIST CREDENTIAL MANAGERS
-              </h3>
+            <div className="cyber-glass border border-cyber-magenta/20 p-5 flex flex-col gap-1">
+              <span className="text-[10px] font-mono text-gray-400 uppercase">TEAMS EVALUATED</span>
+              <span className="font-orbitron font-extrabold text-2xl text-white">
+                {teams.filter((t) => scores.some((s) => s.teamId === t.id)).length} / {teams.length}
+              </span>
+              <span className="text-[9px] font-mono text-cyber-green">ACTIVE IN THIS EVENT</span>
+            </div>
 
-              {/* Form Add Judge */}
-              <form onSubmit={handleAddJudge} className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-cyber-bg-darker/50 p-4 border border-cyber-magenta/10">
-                <div className="md:col-span-2">
-                  <span className="font-mono text-[9px] text-cyber-magenta font-bold uppercase tracking-wider block mb-1">
-                    ➕ INGEST NEW JURIST NODE
-                  </span>
-                </div>
+            <div className="cyber-glass border border-cyber-magenta/20 p-5 flex flex-col gap-1">
+              <span className="text-[10px] font-mono text-gray-400 uppercase">PRESENTATION LIMIT</span>
+              <span className="font-orbitron font-extrabold text-2xl text-cyber-cyan">
+                {timerMinutes} MIN
+              </span>
+              <span className="text-[9px] font-mono text-gray-500">{timerMinutes * 60} SECONDS</span>
+            </div>
+
+            <div className="cyber-glass border border-cyber-magenta/20 p-5 flex flex-col gap-1">
+              <span className="text-[10px] font-mono text-gray-400 uppercase">BROADCAST SIGNAL</span>
+              <span className={`font-orbitron font-extrabold text-xl ${announceResults ? "text-cyber-green" : "text-cyber-red"}`}>
+                {announceResults ? "LIVE UNLOCKED" : "LOCKED"}
+              </span>
+              <span className="text-[9px] font-mono text-gray-500">/results FEED</span>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================== */}
+        {/* TAB 2: EVENTS MANAGEMENT (REQUIREMENT 6 & 8)                   */}
+        {/* ============================================================== */}
+        {activeTab === "events" && (
+          <div className="flex flex-col gap-6">
+            {/* Create New Event Form */}
+            <div className="cyber-glass border border-cyber-magenta/20 p-6 flex flex-col gap-4">
+              <h2 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase border-b border-cyber-magenta/15 pb-2">
+                ➕ CREATE NEW HACKATHON / EVALUATION EVENT
+              </h2>
+
+              <form onSubmit={handleCreateEvent} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <CyberInput
                   variant="magenta"
-                  label="JURIST NAME"
-                  placeholder="e.g. Dr. Ananya Rao"
+                  label="EVENT NAME"
+                  placeholder="e.g. IEEE Innovation Challenge"
+                  value={newEventName}
+                  onChange={(e) => setNewEventName(e.target.value)}
+                  disabled={actionLoading}
+                  required
+                />
+                <CyberInput
+                  variant="magenta"
+                  label="SUBTITLE / THEME"
+                  placeholder="e.g. Student Branch Flagship 2026"
+                  value={newEventSubtitle}
+                  onChange={(e) => setNewEventSubtitle(e.target.value)}
+                  disabled={actionLoading}
+                />
+                <CyberInput
+                  variant="magenta"
+                  label="ORGANIZER NAME"
+                  placeholder="e.g. IEEE CIS / BMSIT"
+                  value={newEventOrganizer}
+                  onChange={(e) => setNewEventOrganizer(e.target.value)}
+                  disabled={actionLoading}
+                />
+                <CyberInput
+                  variant="magenta"
+                  label="LOGO SVG/IMAGE PATH"
+                  placeholder="e.g. /ieee-logo.svg or /pals-logo.svg"
+                  value={newEventLogo}
+                  onChange={(e) => setNewEventLogo(e.target.value)}
+                  disabled={actionLoading}
+                />
+                <CyberInput
+                  variant="magenta"
+                  label="TIME LIMIT (MINUTES)"
+                  type="number"
+                  min="1"
+                  max="60"
+                  value={newEventTimer}
+                  onChange={(e) => setNewEventTimer(e.target.value)}
+                  disabled={actionLoading}
+                />
+
+                <div className="flex items-end">
+                  <CyberButton type="submit" variant="magenta" fullWidth disabled={actionLoading}>
+                    {actionLoading ? "CREATING..." : "CREATE & INITIALIZE EVENT"}
+                  </CyberButton>
+                </div>
+              </form>
+            </div>
+
+            {/* List of Registered Events */}
+            <div className="cyber-glass border border-cyber-magenta/20 p-6 flex flex-col gap-4">
+              <h2 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase border-b border-cyber-magenta/15 pb-2">
+                🌐 REGISTERED PLATFORM EVENTS ({events.length})
+              </h2>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {events.map((ev) => {
+                  const isCurrent = ev.id === selectedEventId;
+                  return (
+                    <div 
+                      key={ev.id}
+                      className={`p-4 border transition-all flex flex-col justify-between gap-3 ${
+                        isCurrent 
+                          ? "border-cyber-magenta bg-cyber-magenta/10 shadow-[0_0_15px_rgba(217,70,239,0.15)]" 
+                          : "border-gray-800 bg-cyber-bg-darker/60 hover:border-gray-700"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            {ev.logo && (
+                              /* eslint-disable-next-line @next/next/no-img-element */
+                              <img src={ev.logo} alt="" className="h-5 max-w-[80px] object-contain" />
+                            )}
+                            <h3 className="font-orbitron font-bold text-white text-sm uppercase truncate">
+                              {ev.name}
+                            </h3>
+                          </div>
+                          {ev.subtitle && <p className="text-xs text-gray-400 font-mono mt-0.5">{ev.subtitle}</p>}
+                          {ev.organizer && <p className="text-[10px] text-cyber-cyan font-mono mt-0.5">By {ev.organizer}</p>}
+                          <p className="text-[10px] text-gray-500 font-mono mt-1">ID: {ev.id} • Timer: {Math.round(ev.timerDuration / 60)}m</p>
+                        </div>
+
+                        {isCurrent && (
+                          <span className="text-[9px] font-mono text-cyber-green bg-cyber-green/10 border border-cyber-green/30 px-2 py-0.5 font-bold uppercase shrink-0">
+                            ACTIVE
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex justify-end gap-2 border-t border-white/5 pt-2">
+                        {!isCurrent && (
+                          <CyberButton
+                            variant="cyan"
+                            size="sm"
+                            onClick={() => handleEventSwitch(ev.id)}
+                            disabled={actionLoading}
+                          >
+                            SWITCH TO THIS EVENT
+                          </CyberButton>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================== */}
+        {/* TAB 3: JUDGES (SCOPED TO CURRENT EVENT)                         */}
+        {/* ============================================================== */}
+        {activeTab === "judges" && (
+          <div className="flex flex-col gap-6">
+            {/* Add Judge Form */}
+            <div className="cyber-glass border border-cyber-magenta/20 p-6 flex flex-col gap-4">
+              <h2 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase border-b border-cyber-magenta/15 pb-2">
+                ➕ ASSIGN NEW JUDGE TO {currentEvent?.name?.toUpperCase() || "CURRENT EVENT"}
+              </h2>
+
+              <form onSubmit={handleAddJudge} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <CyberInput
+                  variant="magenta"
+                  label="FULL NAME"
+                  placeholder="e.g. Dr. Jane Smith"
                   value={newJudgeName}
                   onChange={(e) => setNewJudgeName(e.target.value)}
                   disabled={actionLoading}
@@ -669,8 +852,8 @@ export default function AdminPage() {
                 />
                 <CyberInput
                   variant="magenta"
-                  label="DESIGNATION / INSTITUTION"
-                  placeholder="e.g. Professor, CSE"
+                  label="DESIGNATION"
+                  placeholder="e.g. Professor, AI Dept"
                   value={newJudgeDesg}
                   onChange={(e) => setNewJudgeDesg(e.target.value)}
                   disabled={actionLoading}
@@ -678,8 +861,8 @@ export default function AdminPage() {
                 />
                 <CyberInput
                   variant="magenta"
-                  label="ASSIGN LOGIN ID (USERNAME)"
-                  placeholder="e.g. judge1"
+                  label="USERNAME / EMAIL"
+                  placeholder="e.g. janesmith@test.com"
                   value={newJudgeUser}
                   onChange={(e) => setNewJudgeUser(e.target.value)}
                   disabled={actionLoading}
@@ -687,448 +870,498 @@ export default function AdminPage() {
                 />
                 <CyberInput
                   variant="magenta"
-                  label="ASSIGN ACCESS KEY (PASSWORD)"
-                  placeholder="e.g. score1"
+                  label="INITIAL PASSWORD"
+                  type="password"
+                  placeholder="••••••••"
                   value={newJudgePass}
                   onChange={(e) => setNewJudgePass(e.target.value)}
                   disabled={actionLoading}
                   required
                 />
-                <div className="md:col-span-2 flex justify-end mt-2">
-                  <CyberButton
-                    type="submit"
-                    variant="magenta"
-                    size="sm"
-                    disabled={actionLoading}
-                  >
-                    <Plus className="w-3.5 h-3.5" /> REGISTER JURIST
+                <div className="sm:col-span-2 lg:col-span-4 flex justify-end">
+                  <CyberButton type="submit" variant="magenta" disabled={actionLoading}>
+                    REGISTER & ASSIGN TO THIS EVENT
                   </CyberButton>
                 </div>
               </form>
+            </div>
 
-              {/* Judges List */}
-              <div className="flex flex-col gap-3">
-                <span className="font-mono text-[10px] text-gray-500 uppercase tracking-widest">
-                  LISTED ONLINE JURISTS ({judges.length})
-                </span>
-                <div className="flex flex-col gap-2 max-h-[300px] overflow-y-auto pr-1">
-                  {judges.length === 0 ? (
-                    <p className="text-xs font-mono italic text-gray-500">No active judges configured.</p>
-                  ) : (
-                    judges.map((j) => (
-                      <div key={j.id} className="bg-cyber-bg-darker/60 border border-gray-800 p-3 flex justify-between items-center hover:border-cyber-magenta/20 transition-all duration-300">
-                        <div className="flex flex-col gap-1">
-                          <span className="font-orbitron font-bold text-xs text-white uppercase">{j.name}</span>
-                          <span className="text-[10px] text-gray-400 font-mono uppercase">{j.designation}</span>
-                          <div className="flex gap-4 font-mono text-[9px] text-cyber-magenta mt-1 uppercase">
-                            <span>USER: {j.username}</span>
-                            <span>PASS: {j.password}</span>
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => handleRemoveJudge(j.id)}
-                          className="p-2 text-gray-500 hover:text-cyber-red hover:bg-cyber-red/10 border border-transparent hover:border-cyber-red/20 transition-all duration-300 cursor-pointer"
-                          title="Purge Jurist from system"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
+            {/* Judges Table */}
+            <div className="cyber-glass border border-cyber-magenta/20 p-6 flex flex-col gap-4">
+              <h2 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase border-b border-cyber-magenta/15 pb-2">
+                👥 ASSIGNED JUDGES ({judges.length})
+              </h2>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left font-mono text-xs">
+                  <thead>
+                    <tr className="border-b border-gray-800 text-gray-400">
+                      <th className="p-2.5 uppercase">NAME</th>
+                      <th className="p-2.5 uppercase">DESIGNATION</th>
+                      <th className="p-2.5 uppercase">EMAIL / USERNAME</th>
+                      <th className="p-2.5 uppercase">EVENT</th>
+                      <th className="p-2.5 uppercase">STATUS</th>
+                      <th className="p-2.5 uppercase text-right">ACTION</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {judges.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="p-4 text-center text-gray-500 italic">No judges registered for this event.</td>
+                      </tr>
+                    ) : (
+                      judges.map((j) => (
+                        <tr key={j.id} className="border-b border-gray-900 hover:bg-white/5">
+                          <td className="p-2.5 font-bold text-white">{j.name}</td>
+                          <td className="p-2.5 text-gray-300">{j.designation}</td>
+                          <td className="p-2.5 text-cyber-cyan">{j.email || j.username}</td>
+                          <td className="p-2.5 text-gray-400">{j.eventId || "default_event"}</td>
+                          <td className="p-2.5">
+                            <span className={`px-2 py-0.5 text-[9px] font-bold uppercase ${j.completed ? "bg-cyber-green/10 text-cyber-green border border-cyber-green/30" : "bg-cyber-yellow/10 text-cyber-yellow"}`}>
+                              {j.completed ? "COMPLETED" : "EVALUATING"}
+                            </span>
+                          </td>
+                          <td className="p-2.5 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveJudge(j.id)}
+                              className="text-gray-500 hover:text-cyber-red p-1 cursor-pointer"
+                              title="Delete Judge"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
-          )}
+          </div>
+        )}
 
-          {/* TAB 3: TEAMS */}
-          {activeTab === "teams" && (
-            <div className="cyber-glass border border-cyber-magenta/15 p-6 flex flex-col gap-6">
-              <h3 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase border-b border-cyber-magenta/15 pb-2.5">
-                📂 TEAM REPOSITORIES
-              </h3>
+        {/* ============================================================== */}
+        {/* TAB 4: TEAMS (SCOPED TO CURRENT EVENT)                          */}
+        {/* ============================================================== */}
+        {activeTab === "teams" && (
+          <div className="flex flex-col gap-6">
+            {/* Add Team Form */}
+            <div className="cyber-glass border border-cyber-magenta/20 p-6 flex flex-col gap-4">
+              <h2 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase border-b border-cyber-magenta/15 pb-2">
+                ➕ REGISTER TEAM FOR {currentEvent?.name?.toUpperCase() || "CURRENT EVENT"}
+              </h2>
 
-              {/* Form Add Team */}
-              <form onSubmit={handleAddTeam} className="flex gap-4 items-end bg-cyber-bg-darker/50 p-4 border border-cyber-magenta/10">
+              <form onSubmit={handleAddTeam} className="flex flex-col sm:flex-row gap-4">
                 <div className="flex-grow">
                   <CyberInput
                     variant="magenta"
-                    label="PROTOTYPE TEAM IDENTIFIER"
-                    placeholder="e.g. Team Gamma (T6)"
+                    label="TEAM NAME"
+                    placeholder="e.g. NeuroSync AI"
                     value={newTeamName}
                     onChange={(e) => setNewTeamName(e.target.value)}
                     disabled={actionLoading}
                     required
                   />
                 </div>
-                <CyberButton
-                  type="submit"
-                  variant="magenta"
-                  size="md"
-                  disabled={actionLoading}
-                  className="shrink-0 mb-1"
-                >
-                  <Plus className="w-4 h-4" /> REGISTER TEAM
-                </CyberButton>
+                <div className="flex items-end">
+                  <CyberButton type="submit" variant="magenta" disabled={actionLoading}>
+                    ADD TEAM
+                  </CyberButton>
+                </div>
               </form>
-
-              {/* Team list */}
-              <div className="flex flex-col gap-3">
-                <span className="font-mono text-[10px] text-gray-500 uppercase tracking-widest">
-                  REGISTERED DIRECTORIES ({teams.length})
-                </span>
-                <div className="flex flex-col gap-2 max-h-[350px] overflow-y-auto pr-1">
-                  {teams.length === 0 ? (
-                    <p className="text-xs font-mono italic text-gray-500">No teams registered in local storage.</p>
-                  ) : (
-                    teams.map((t) => {
-                      const complCount = scores.filter((s) => s.teamId === t.id).length;
-                      const isDq = t.name.startsWith("[DISQUALIFIED]");
-                      
-                      return (
-                        <div key={t.id} className="bg-cyber-bg-darker/60 border border-gray-800 p-3 flex justify-between items-center hover:border-cyber-magenta/20 transition-all duration-300">
-                          <div className="flex flex-col gap-0.5">
-                            <span className={`font-orbitron font-bold text-xs uppercase ${isDq ? "text-cyber-red line-through" : "text-white"}`}>{t.name}</span>
-                            <span className="text-[9px] text-gray-500 font-mono uppercase">
-                              COMPLETED EVALS: {complCount}/{judges.length}
-                            </span>
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleDisqualifyTeam(t.id, t.name, isDq)}
-                              className={`p-2 border border-transparent transition-all duration-300 cursor-pointer ${isDq ? "text-cyber-green hover:bg-cyber-green/10 hover:border-cyber-green/20" : "text-cyber-yellow hover:bg-cyber-yellow/10 hover:border-cyber-yellow/20"}`}
-                              title={isDq ? "Reinstate Team" : "Disqualify Team"}
-                            >
-                              <AlertOctagon className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleRemoveTeam(t.id)}
-                              className="p-2 text-gray-500 hover:text-cyber-red hover:bg-cyber-red/10 border border-transparent hover:border-cyber-red/20 transition-all duration-300 cursor-pointer"
-                              title="Eliminate Team from system"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
             </div>
-          )}
 
-          {/* TAB 4: CRITERIA & TIMER */}
-          {activeTab === "criteria" && (
-            <div className="flex flex-col gap-6">
-              {/* Scoring parameters manager card */}
-              <div className="cyber-glass border border-cyber-magenta/15 p-6 flex flex-col gap-6">
-                <div className="flex justify-between items-center border-b border-cyber-magenta/15 pb-2.5">
-                  <h3 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase">
-                    ⚙️ SCORING PARAMETERS MANAGER
-                  </h3>
-                  <CyberButton
-                    variant="magenta"
-                    size="sm"
-                    onClick={handleSaveCriteria}
-                    disabled={actionLoading}
-                  >
-                    <Save className="w-3.5 h-3.5" /> SAVE CRITERIA
-                  </CyberButton>
-                </div>
+            {/* Teams Table */}
+            <div className="cyber-glass border border-cyber-magenta/20 p-6 flex flex-col gap-4">
+              <h2 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase border-b border-cyber-magenta/15 pb-2">
+                🏆 REGISTERED TEAMS ({teams.length})
+              </h2>
 
-                <div className="bg-cyber-magenta/5 border border-cyber-magenta/20 p-3 text-xs font-mono text-gray-400">
-                  ⚡ PROTOCOL: ADJUSTING, ADDING, OR PURGING EVALUATION PARAMETERS CHANGES THE SCORING RATIO MATRIX IN REAL-TIME. RENAMING AND INDIVIDUAL ELEMENT MANAGEMENT IS MODIFIED BELOW.
-                </div>
-
-                {/* Add new criteria form */}
-                <form onSubmit={handleAddCriteria} className="flex gap-3 items-end bg-cyber-bg-darker/50 p-3 border border-cyber-magenta/10">
-                  <div className="flex-grow">
-                    <CyberInput
-                      variant="magenta"
-                      label="ADD NEW EVALUATION PARAMETER"
-                      placeholder="e.g. Code Aesthetics & Formatting"
-                      value={newCriteriaName}
-                      onChange={(e) => setNewCriteriaName(e.target.value)}
-                      disabled={actionLoading}
-                      required
-                    />
-                  </div>
-                  <CyberButton
-                    type="submit"
-                    variant="magenta"
-                    size="sm"
-                    disabled={actionLoading}
-                    className="shrink-0 mb-1"
-                  >
-                    <Plus className="w-3.5 h-3.5" /> ADD
-                  </CyberButton>
-                </form>
-
-                <div className="flex flex-col gap-3 max-h-[300px] overflow-y-auto pr-1">
-                  {criteria.length === 0 ? (
-                    <p className="text-xs font-mono italic text-gray-500 text-center py-4">No active parameters. Please add one above.</p>
-                  ) : (
-                    criteria.map((c, index) => (
-                      <div key={c.id} className="flex gap-4 items-center bg-cyber-bg-darker/60 border border-gray-800 p-3 hover:border-cyber-magenta/10 transition-colors duration-200">
-                        <span className="font-mono text-xs font-bold text-cyber-magenta w-8 shrink-0">
-                          CR-{index + 1}
-                        </span>
-                        <div className="flex-grow">
-                          <input
-                            type="text"
-                            value={c.name}
-                            onChange={(e) => handleCriteriaChange(index, e.target.value)}
-                            className="w-full bg-gray-950/80 text-gray-100 font-mono text-xs px-3 py-1.5 border border-gray-800 focus:border-cyber-magenta outline-none"
-                          />
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveCriteria(c.id)}
-                          className="p-1.5 text-gray-500 hover:text-cyber-red hover:bg-cyber-red/10 border border-transparent hover:border-cyber-red/20 transition-all duration-300 cursor-pointer"
-                          title="Purge parameter"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* Dynamic Presentation Timer Limit Configuration Card */}
-              <div className="cyber-glass border border-cyber-magenta/15 p-6 flex flex-col gap-5">
-                <div className="flex justify-between items-center border-b border-cyber-magenta/15 pb-2.5">
-                  <div className="flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-cyber-magenta" />
-                    <h3 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase">
-                      ⏲️ PRESENTATION TIME LIMIT
-                    </h3>
-                  </div>
-                  <CyberButton
-                    variant="magenta"
-                    size="sm"
-                    onClick={handleSaveTimer}
-                    disabled={actionLoading}
-                  >
-                    <Save className="w-3.5 h-3.5" /> SAVE TIME LIMIT
-                  </CyberButton>
-                </div>
-
-                <div className="bg-cyber-magenta/5 border border-cyber-magenta/20 p-3 text-xs font-mono text-gray-400">
-                  ⚡ PROTOCOL: ADJUSTING THE TIME LIMIT SETS THE COUNTDOWN CLOCK FOR ALL ONLINE JURISTS INSTANTLY. TIME LIMIT EXPRESSED IN MINUTES.
-                </div>
-
-                <div className="flex gap-4 items-end bg-cyber-bg-darker/50 p-4 border border-cyber-magenta/10">
-                  <div className="flex-grow">
-                    <CyberInput
-                      variant="magenta"
-                      label="PRESENTATION LIMIT (MINUTES)"
-                      type="number"
-                      min="1"
-                      max="60"
-                      value={timerDuration}
-                      onChange={(e) => setTimerDuration(parseInt(e.target.value) || 1)}
-                      disabled={actionLoading}
-                      required
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 5: MASTER MATRIX GRID */}
-          {activeTab === "matrix" && (
-            <div className="cyber-glass border border-cyber-magenta/15 p-6 flex flex-col gap-6">
-              <div className="flex justify-between items-center border-b border-cyber-magenta/15 pb-2.5">
-                <h3 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase">
-                  🧮 JURY DATA SPREADSHEET MATRIX
-                </h3>
-                {teams.length > 0 && (
-                  <CyberButton
-                    variant="cyan"
-                    size="sm"
-                    onClick={handleExportCSV}
-                    className="flex items-center gap-1.5"
-                  >
-                    <Download className="w-3.5 h-3.5" /> EXPORT CSV
-                  </CyberButton>
-                )}
-              </div>
-
-              {teams.length === 0 ? (
-                <p className="text-xs font-mono italic text-gray-500 text-center py-6">No teams registered to construct matrix.</p>
-              ) : (
-                <div className="overflow-x-auto border border-gray-800">
-                  <table className="w-full text-left font-mono text-xs">
-                    <thead>
-                      <tr className="bg-cyber-bg-darker border-b border-gray-800">
-                        <th className="p-3 font-orbitron text-gray-400 font-bold uppercase">TEAM NAME</th>
-                        {judges.map((j) => (
-                          <th key={j.id} className="p-3 font-orbitron text-gray-400 font-bold uppercase truncate max-w-[120px]" title={j.name}>
-                            {j.name.split(" ")[0]}..
-                          </th>
-                        ))}
-                        <th className="p-3 font-orbitron text-cyber-magenta font-bold uppercase text-right">AVG RATIO</th>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left font-mono text-xs">
+                  <thead>
+                    <tr className="border-b border-gray-800 text-gray-400">
+                      <th className="p-2.5 uppercase">TEAM NAME</th>
+                      <th className="p-2.5 uppercase">CODE</th>
+                      <th className="p-2.5 uppercase">PROJECT</th>
+                      <th className="p-2.5 uppercase">EVENT</th>
+                      <th className="p-2.5 uppercase">EVALUATIONS</th>
+                      <th className="p-2.5 uppercase text-right">ACTION</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {teams.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="p-4 text-center text-gray-500 italic">No teams registered for this event.</td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {teams.map((t) => {
-                        const teamScores = scores.filter((s) => s.teamId === t.id);
-                        const averageScore = teamScores.length > 0
-                          ? parseFloat((teamScores.reduce((sum, s) => sum + s.totalScore, 0) / teamScores.length).toFixed(2))
-                          : 0;
+                    ) : (
+                      teams.map((t) => {
+                        const isDq = t.name.startsWith("[DISQUALIFIED]");
+                        const evCount = scores.filter((s) => s.teamId === t.id).length;
 
                         return (
-                          <tr key={t.id} className="border-b border-gray-900 hover:bg-white/5 transition-colors duration-200">
-                            <td className="p-3 font-bold text-white uppercase">{t.name}</td>
-                            
-                            {judges.map((j) => {
-                              const match = teamScores.find((s) => s.judgeId === j.id);
-                              
-                              return (
-                                <td key={j.id} className="p-3">
-                                  {match ? (
-                                    <span className="text-cyber-cyan font-bold text-glow-cyan">
-                                      {match.totalScore}
-                                    </span>
-                                  ) : (
-                                    <span className="text-[10px] text-cyber-yellow/60 font-semibold animate-pulse uppercase">
-                                      PENDING
-                                    </span>
-                                  )}
-                                </td>
-                              );
-                            })}
-
-                            <td className="p-3 text-right font-orbitron font-extrabold text-sm text-cyber-magenta text-glow-magenta">
-                              {averageScore}
+                          <tr key={t.id} className="border-b border-gray-900 hover:bg-white/5">
+                            <td className={`p-2.5 font-bold ${isDq ? "text-cyber-red line-through" : "text-white"}`}>
+                              {t.name}
+                            </td>
+                            <td className="p-2.5 text-gray-400">{t.teamCode}</td>
+                            <td className="p-2.5 text-gray-300">{t.projectName || t.name}</td>
+                            <td className="p-2.5 text-gray-400">{t.eventId || "default_event"}</td>
+                            <td className="p-2.5 text-cyber-cyan font-bold">{evCount} jurists</td>
+                            <td className="p-2.5 text-right flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleDisqualifyTeam(t.id, t.name, isDq)}
+                                className={`px-2 py-0.5 text-[10px] font-bold uppercase border cursor-pointer ${
+                                  isDq ? "border-cyber-green text-cyber-green hover:bg-cyber-green/10" : "border-cyber-yellow text-cyber-yellow hover:bg-cyber-yellow/10"
+                                }`}
+                              >
+                                {isDq ? "REINSTATE" : "DISQUALIFY"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveTeam(t.id)}
+                                className="text-gray-500 hover:text-cyber-red p-1 cursor-pointer"
+                                title="Delete Team"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
                             </td>
                           </tr>
                         );
-                      })}
-                    </tbody>
-                  </table>
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================== */}
+        {/* TAB 5: CRITERIA                                                */}
+        {/* ============================================================== */}
+        {activeTab === "criteria" && (
+          <div className="cyber-glass border border-cyber-magenta/20 p-6 flex flex-col gap-5">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-cyber-magenta/15 pb-3">
+              <div>
+                <h2 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase">
+                  ⚙️ SCORING CRITERIA FOR {currentEvent?.name?.toUpperCase() || "CURRENT EVENT"}
+                </h2>
+                <p className="text-xs text-gray-400 font-mono mt-0.5">Parameters evaluated out of 10 integer marks.</p>
+              </div>
+
+              <CyberButton variant="magenta" size="sm" onClick={handleSaveCriteria} disabled={actionLoading}>
+                <Save className="w-3.5 h-3.5" /> SAVE CRITERIA LIST
+              </CyberButton>
+            </div>
+
+            <form onSubmit={handleAddCriteria} className="flex gap-3">
+              <div className="flex-grow">
+                <CyberInput
+                  variant="magenta"
+                  placeholder="e.g. Technical Feasibility"
+                  value={newCriteriaName}
+                  onChange={(e) => setNewCriteriaName(e.target.value)}
+                  disabled={actionLoading}
+                />
+              </div>
+              <CyberButton type="submit" variant="cyan" size="sm" disabled={actionLoading}>
+                ADD PARAMETER
+              </CyberButton>
+            </form>
+
+            <div className="flex flex-col gap-2 mt-2">
+              {criteria.map((c, index) => (
+                <div key={c.id} className="flex items-center gap-3 bg-cyber-bg-darker/60 border border-gray-800 p-2.5">
+                  <span className="font-mono text-xs font-bold text-cyber-magenta w-8 shrink-0">#{index + 1}</span>
+                  <input
+                    type="text"
+                    value={c.name}
+                    onChange={(e) => handleCriteriaChange(index, e.target.value)}
+                    className="flex-grow bg-transparent text-white font-mono text-xs outline-none border-b border-gray-700 focus:border-cyber-magenta py-1"
+                  />
+                  {c.weight && <span className="text-[10px] text-gray-500 font-mono shrink-0">W: {c.weight}</span>}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveCriteria(c.id)}
+                    className="text-gray-500 hover:text-cyber-red p-1 cursor-pointer shrink-0"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================== */}
+        {/* TAB 6: MASTER MATRIX GRID                                      */}
+        {/* ============================================================== */}
+        {activeTab === "matrix" && (
+          <div className="cyber-glass border border-cyber-magenta/20 p-6 flex flex-col gap-4">
+            <div className="flex justify-between items-center border-b border-cyber-magenta/15 pb-3">
+              <div>
+                <h2 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase">
+                  🧮 JURY DATA MATRIX ({currentEvent?.name?.toUpperCase() || selectedEventId})
+                </h2>
+                <p className="text-xs text-gray-400 font-mono mt-0.5">Live scores matrix across all judges.</p>
+              </div>
+
+              {teams.length > 0 && (
+                <CyberButton variant="cyan" size="sm" onClick={handleExportCSV} className="flex items-center gap-1.5">
+                  <Download className="w-3.5 h-3.5" /> EXPORT CSV
+                </CyberButton>
               )}
             </div>
-          )}
 
-          {/* TAB 5.5: LEADERBOARD RENDERING VIEW */}
-          {activeTab === "leaderboard" && (
-            <div className="cyber-glass border border-cyber-magenta/15 p-6 flex flex-col gap-6">
-              <h3 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase border-b border-cyber-magenta/15 pb-2.5">
-                🏆 LIVE RANKED LEADERBOARD
-              </h3>
-              
-              <div className="flex flex-col gap-4">
-                {leaderboard.length === 0 ? (
-                  <p className="text-xs font-mono italic text-gray-500 text-center py-6">No scores compiled yet to rank teams.</p>
-                ) : (
-                  leaderboard.map((entry) => {
-                    const isFirst = entry.rank === 1;
-                    const isSecond = entry.rank === 2;
-                    const isThird = entry.rank === 3;
-                    
-                    const rankColor = isFirst 
-                      ? "border-cyber-yellow text-cyber-yellow bg-cyber-yellow/10 shadow-[0_0_10px_rgba(234,179,8,0.1)]" 
-                      : isSecond 
-                        ? "border-cyber-cyan text-cyber-cyan bg-cyber-cyan/10 shadow-[0_0_10px_rgba(6,182,212,0.1)]" 
-                        : isThird 
-                          ? "border-cyber-magenta text-cyber-magenta bg-cyber-magenta/10 shadow-[0_0_10px_rgba(217,70,239,0.1)]"
-                          : "border-gray-800 text-gray-400 bg-gray-900/30";
+            {teams.length === 0 ? (
+              <p className="text-xs font-mono italic text-gray-500 text-center py-6">No teams registered for this event.</p>
+            ) : (
+              <div className="overflow-x-auto border border-gray-800">
+                <table className="w-full text-left font-mono text-xs">
+                  <thead>
+                    <tr className="bg-cyber-bg-darker border-b border-gray-800 text-gray-400">
+                      <th className="p-3 font-orbitron uppercase">TEAM NAME</th>
+                      {judges.map((j) => (
+                        <th key={j.id} className="p-3 font-orbitron uppercase truncate max-w-[120px]" title={j.name}>
+                          {j.name.split(" ")[0]}..
+                        </th>
+                      ))}
+                      <th className="p-3 font-orbitron text-cyber-magenta text-right uppercase">AVG SCORE</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {teams.map((t) => {
+                      const teamScores = scores.filter((s) => s.teamId === t.id);
+                      const avg = teamScores.length > 0
+                        ? (teamScores.reduce((sum, s) => sum + s.totalScore, 0) / teamScores.length).toFixed(2)
+                        : "0.00";
 
-                    return (
-                      <div key={entry.teamId} className="bg-cyber-bg-darker/60 border border-gray-800 p-4 flex justify-between items-center hover:border-cyber-magenta/20 transition-all duration-300">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-10 h-10 flex items-center justify-center font-orbitron font-extrabold text-sm border clip-cyber ${rankColor}`}>
-                            #{entry.rank}
-                          </div>
-                          <div className="flex flex-col gap-0.5">
-                            <span className="font-orbitron font-bold text-xs text-white uppercase">{entry.teamName}</span>
-                            <span className="text-[9px] text-gray-500 font-mono uppercase">
-                              Scored by {entry.judgeSubmissions.length} Jurists
-                            </span>
-                          </div>
-                        </div>
+                      return (
+                        <tr key={t.id} className="border-b border-gray-900 hover:bg-white/5">
+                          <td className="p-3 font-bold text-white uppercase">{t.name}</td>
+                          {judges.map((j) => {
+                            const match = teamScores.find((s) => s.judgeId === j.id);
+                            return (
+                              <td key={j.id} className="p-3">
+                                {match ? (
+                                  <span className="text-cyber-cyan font-bold">{match.totalScore}</span>
+                                ) : (
+                                  <span className="text-[10px] text-cyber-yellow/60 font-semibold uppercase">PENDING</span>
+                                )}
+                              </td>
+                            );
+                          })}
+                          <td className="p-3 text-right font-orbitron font-extrabold text-sm text-cyber-magenta">
+                            {avg}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
 
-                        <div className="text-right">
-                          <span className="text-[9px] text-gray-500 font-mono uppercase block">AVERAGE SCORE</span>
-                          <span className={`font-orbitron font-extrabold text-base tracking-wider ${
-                            isFirst ? "text-cyber-yellow" : isSecond ? "text-cyber-cyan" : "text-cyber-magenta"
-                          }`}>
-                            {entry.averageScore}
-                          </span>
-                        </div>
+        {/* ============================================================== */}
+        {/* TAB 7: LEADERBOARD                                             */}
+        {/* ============================================================== */}
+        {activeTab === "leaderboard" && (
+          <div className="cyber-glass border border-cyber-magenta/20 p-6 flex flex-col gap-4">
+            <h2 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase border-b border-cyber-magenta/15 pb-2">
+              🏆 LEADERBOARD RANKINGS ({currentEvent?.name?.toUpperCase() || selectedEventId})
+            </h2>
+
+            <div className="flex flex-col gap-3">
+              {leaderboard.length === 0 ? (
+                <p className="text-xs font-mono italic text-gray-500 text-center py-6">No scores compiled yet for this event.</p>
+              ) : (
+                leaderboard.map((entry) => (
+                  <div key={entry.teamId} className="bg-cyber-bg-darker/60 border border-gray-800 p-3.5 flex justify-between items-center hover:border-cyber-magenta/30">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-9 h-9 flex items-center justify-center font-orbitron font-extrabold text-sm border ${
+                        entry.rank === 1 ? "border-cyber-yellow text-cyber-yellow bg-cyber-yellow/10" :
+                        entry.rank === 2 ? "border-cyber-cyan text-cyber-cyan bg-cyber-cyan/10" :
+                        entry.rank === 3 ? "border-cyber-magenta text-cyber-magenta bg-cyber-magenta/10" :
+                        "border-gray-800 text-gray-400"
+                      }`}>
+                        #{entry.rank}
                       </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          )}
+                      <div>
+                        <span className="font-orbitron font-bold text-xs text-white uppercase">{entry.teamName}</span>
+                        <span className="text-[9px] text-gray-500 font-mono block">
+                          Scored by {entry.judgeSubmissions.length} Jurists
+                        </span>
+                      </div>
+                    </div>
 
-          {/* TAB 6: BROADCAST CONTROL & SYSTEM RESET */}
-          {activeTab === "system" && (
-            <div className="flex flex-col gap-6">
-              {/* Broadcast Switcher card */}
-              <div className="cyber-glass border border-cyber-magenta/15 p-6 flex flex-col gap-4">
-                <div className="flex items-center gap-2 border-b border-cyber-magenta/15 pb-2.5">
-                  <Radio className="w-5 h-5 text-cyber-magenta" />
-                  <h3 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase">
-                    PUBLIC RESULTS BROADCASTER
-                  </h3>
-                </div>
-                <p className="text-xs text-gray-400 font-sans leading-relaxed">
-                  Broadcasting results unlocks `/results` across the intranet, sorting teams by average score across judges. De-activating instantly restores AES encryption blockade.
-                </p>
-
-                <div className="flex items-center justify-between bg-cyber-bg-darker/60 border border-gray-800 p-4 mt-1.5">
-                  <div className="flex items-center gap-2 font-mono text-xs">
-                    <span className={`w-2.5 h-2.5 rounded-full ${announceResults ? "bg-cyber-green" : "bg-cyber-red"}`} />
-                    <span className="text-white uppercase font-bold">
-                      TRANSMISSION FEED: {announceResults ? "ACTIVE BROADCASTING" : "ENCRYPTED BLOCK"}
-                    </span>
+                    <div className="text-right">
+                      <span className="text-[9px] text-gray-500 font-mono uppercase block">WEIGHTED AVG</span>
+                      <span className="font-orbitron font-extrabold text-base text-cyber-magenta">
+                        {entry.averageScore} PTS
+                      </span>
+                    </div>
                   </div>
-                  <CyberButton
-                    variant={announceResults ? "red" : "green"}
-                    size="sm"
-                    onClick={handleToggleBroadcast}
-                    disabled={actionLoading}
-                  >
-                    {announceResults ? "DISCONNECT FEED" : "TRANSMIT ON SIGNAL"}
-                  </CyberButton>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================== */}
+        {/* TAB 8: SYSTEM SETTINGS & PRESENTATION TIMER (REQUIREMENT 3)    */}
+        {/* ============================================================== */}
+        {activeTab === "system" && (
+          <div className="flex flex-col gap-6">
+            {/* PRESENTATION TIMER CARD (REQUIREMENT 3 FIX) */}
+            <div className="cyber-glass border border-cyber-magenta/20 p-6 flex flex-col gap-5">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-cyber-magenta/15 pb-3">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-cyber-magenta" />
+                  <div>
+                    <h2 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase">
+                      ⏲️ PRESENTATION TIME LIMIT CONFIGURATION
+                    </h2>
+                    <p className="text-xs text-gray-400 font-mono mt-0.5">
+                      Sets presentation clock for all judges evaluating {currentEvent?.name || "this event"}.
+                    </p>
+                  </div>
+                </div>
+
+                <CyberButton
+                  variant="magenta"
+                  size="md"
+                  onClick={handleSaveTimer}
+                  disabled={actionLoading}
+                  className="flex items-center gap-1.5 shrink-0"
+                >
+                  <Save className="w-4 h-4" /> SAVE TIME LIMIT
+                </CyberButton>
+              </div>
+
+              {/* Status Indicator */}
+              <div className="bg-cyber-magenta/5 border border-cyber-magenta/20 p-3.5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 font-mono text-xs">
+                <span className="text-gray-300">
+                  CURRENT CONFIGURED DURATION: <strong className="text-cyber-magenta font-bold">{timerMinutes} MINUTES ({timerMinutes * 60} SECONDS)</strong>
+                </span>
+                <span className="text-[10px] text-gray-500">
+                  EVENT: {selectedEventId}
+                </span>
+              </div>
+
+              {/* Quick Preset Buttons */}
+              <div className="flex flex-col gap-1.5">
+                <label className="font-orbitron text-xs font-semibold text-gray-300 uppercase">
+                  QUICK PRESETS (MINUTES):
+                </label>
+                <div className="flex gap-2 flex-wrap">
+                  {[2, 3, 5, 7, 8, 10, 15].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => handleTimerPreset(preset)}
+                      className={`px-3 py-1.5 font-mono text-xs border transition-all cursor-pointer ${
+                        parseInt(timerInputStr, 10) === preset
+                          ? "border-cyber-magenta bg-cyber-magenta/20 text-white font-bold shadow-[0_0_8px_rgba(217,70,239,0.3)]"
+                          : "border-gray-800 bg-cyber-bg-darker hover:border-gray-600 text-gray-400"
+                      }`}
+                    >
+                      {preset} MIN
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {/* Destructive factory reboot */}
-              <div className="cyber-glass border border-cyber-red/25 p-6 flex flex-col gap-4">
-                <div className="flex items-center gap-2 border-b border-cyber-red/20 pb-2.5">
-                  <AlertOctagon className="w-5 h-5 text-cyber-red" />
-                  <h3 className="font-orbitron text-sm font-bold text-cyber-red tracking-wide uppercase">
-                    SYSTEM RESET & RE-BOOT CODES
-                  </h3>
-                </div>
-                <p className="text-xs text-gray-400 font-sans leading-relaxed">
-                  Erase all active registers, reset scoring criteria to defaults, purge jury credentials lists, and restore system state back to factory benchmarks.
-                </p>
-
-                <div className="flex justify-end mt-2">
-                  <CyberButton
-                    variant="red"
-                    size="md"
-                    onClick={handleFactoryReset}
+              {/* Minute Input Field */}
+              <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end bg-cyber-bg-darker/60 p-4 border border-cyber-magenta/10">
+                <div className="flex-grow w-full sm:w-auto">
+                  <label htmlFor="timer-limit-input" className="font-orbitron text-xs font-semibold text-cyber-magenta tracking-widest uppercase block mb-1">
+                    TIME LIMIT (1–60 WHOLE MINUTES)
+                  </label>
+                  <input
+                    id="timer-limit-input"
+                    type="number"
+                    min="1"
+                    max="60"
+                    step="1"
+                    value={timerInputStr}
+                    onChange={(e) => handleTimerInputChange(e.target.value)}
                     disabled={actionLoading}
-                    className="flex items-center gap-1.5 shadow-[0_0_12px_rgba(244,63,94,0.1)] border-cyber-red/30"
-                  >
-                    🚨 TRIGGER SYSTEM DECONSTRUCT
-                  </CyberButton>
+                    className="w-full bg-cyber-bg-darker/90 text-white font-mono text-base px-4 py-2 border border-cyber-magenta/40 focus:border-cyber-magenta outline-none"
+                  />
                 </div>
+
+                <CyberButton
+                  variant="magenta"
+                  size="md"
+                  onClick={handleSaveTimer}
+                  disabled={actionLoading}
+                  className="w-full sm:w-auto shrink-0"
+                >
+                  SET TO {parseInt(timerInputStr, 10) || 5} MIN
+                </CyberButton>
               </div>
             </div>
-          )}
 
-        </section>
+            {/* Broadcast Switcher card */}
+            <div className="cyber-glass border border-cyber-magenta/20 p-6 flex flex-col gap-4">
+              <div className="flex items-center gap-2 border-b border-cyber-magenta/15 pb-2.5">
+                <Radio className="w-5 h-5 text-cyber-magenta" />
+                <h2 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase">
+                  PUBLIC RESULTS BROADCASTER ({currentEvent?.name || selectedEventId})
+                </h2>
+              </div>
+              <p className="text-xs text-gray-400 font-sans leading-relaxed">
+                Broadcasting unlocks `/results?event={selectedEventId}` for the public, revealing podium scores. Locking re-encrypts the results feed.
+              </p>
+
+              <div className="flex items-center justify-between bg-cyber-bg-darker/60 border border-gray-800 p-4">
+                <div className="flex items-center gap-2 font-mono text-xs">
+                  <span className={`w-2.5 h-2.5 rounded-full ${announceResults ? "bg-cyber-green animate-ping" : "bg-cyber-red"}`} />
+                  <span className="text-white uppercase font-bold">
+                    SIGNAL: {announceResults ? "BROADCAST ACTIVE" : "ENCRYPTED / LOCKED"}
+                  </span>
+                </div>
+                <CyberButton
+                  variant={announceResults ? "red" : "green"}
+                  size="sm"
+                  onClick={handleToggleBroadcast}
+                  disabled={actionLoading}
+                >
+                  {announceResults ? "DISCONNECT FEED" : "BROADCAST RESULTS"}
+                </CyberButton>
+              </div>
+            </div>
+
+            {/* Reset scores for event */}
+            <div className="cyber-glass border border-cyber-red/25 p-6 flex flex-col gap-3">
+              <div className="flex items-center gap-2 border-b border-cyber-red/20 pb-2">
+                <AlertOctagon className="w-5 h-5 text-cyber-red" />
+                <h2 className="font-orbitron text-sm font-bold text-cyber-red tracking-wide uppercase">
+                  RESET SCORES FOR CURRENT EVENT
+                </h2>
+              </div>
+              <p className="text-xs text-gray-400 font-sans leading-relaxed">
+                Erases all evaluation scores submitted for {currentEvent?.name || "this event"} only. Leaves other events untouched.
+              </p>
+
+              <div className="flex justify-end mt-2">
+                <CyberButton
+                  variant="red"
+                  size="sm"
+                  onClick={handleFactoryReset}
+                  disabled={actionLoading}
+                >
+                  🚨 ERASE SCORES FOR THIS EVENT
+                </CyberButton>
+              </div>
+            </div>
+          </div>
+        )}
 
       </main>
     </div>
