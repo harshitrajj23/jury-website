@@ -4,8 +4,8 @@ require('dotenv').config();
 const sql = neon(process.env.DATABASE_URL);
 
 async function clean() {
-  await sql`DELETE FROM "Score" WHERE id LIKE 'bench_%' OR id LIKE 'temp_%'`;
-  await sql`DELETE FROM "User" WHERE id LIKE 'bench_%' OR id LIKE 'test_%'`;
+  await sql`DELETE FROM "Score" WHERE id LIKE 'bench_%' OR id LIKE 'temp_%' OR "judgeId" LIKE 'usr_load_%' OR "judgeId" LIKE 'usr_compl_%'`;
+  await sql`DELETE FROM "User" WHERE id LIKE 'bench_%' OR id LIKE 'test_%' OR id LIKE 'usr_load_%' OR id LIKE 'usr_compl_%'`;
   const counts = await sql`
     SELECT 
       (SELECT COUNT(*) FROM "User") as users,
