@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 100" fill="none">
+  <defs>
+    <linearGradient id="ieeeBlue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#006699" />
+      <stop offset="100%" stop-color="#0099ff" />
+    </linearGradient>
+    <filter id="blueGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- IEEE Classic Diamond Shield -->
+  <g transform="translate(15, 10)">
+    <!-- Diamond Outline -->
+    <polygon points="40,2 78,42 40,82 2,42" 
+             stroke="url(#ieeeBlue)" stroke-width="2.5" fill="#060c18" filter="url(#blueGlow)" />
+    
+    <!-- Central Right-hand Spiral Motif -->
+    <circle cx="40" cy="42" r="18" stroke="#0099ff" stroke-width="2" fill="none" />
+    <path d="M40,24 A18,18 0 0,1 58,42" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" fill="none" />
+    <!-- Core Arrow -->
+    <line x1="40" y1="24" x2="40" y2="60" stroke="#0099ff" stroke-width="2.5" />
+    <polygon points="40,18 36,25 44,25" fill="#0099ff" />
+  </g>
+
+  <!-- Typography -->
+  <!-- IEEE Text -->
+  <text x="110" y="54" font-family="'Orbitron', -apple-system, sans-serif" font-weight="900" font-size="38" 
+        letter-spacing="5" fill="#ffffff">
+    IEEE
+  </text>
+  
+  <rect x="250" y="27" width="5" height="28" fill="#0099ff" />
+
+  <!-- Subtitle Tagline -->
+  <text x="112" y="72" font-family="'JetBrains Mono', monospace" font-size="10" font-weight="700" 
+        letter-spacing="2.5" fill="#0099ff">
+    COMPUTATIONAL INTELLIGENCE SOCIETY
+  </text>
+
+  <!-- Cyber Sub-bar -->
+  <line x1="112" y1="80" x2="385" y2="80" stroke="rgba(0, 153, 255, 0.4)" stroke-width="1.5" stroke-dasharray="8 4" />
+</svg>

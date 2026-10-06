@@ -7,9 +7,10 @@ type EventSubscriber = (event: RealtimePayload) => void;
 const memorySubscribers = new Set<EventSubscriber>();
 
 export interface RealtimePayload {
-  table: "Score" | "Team" | "User" | "Criteria" | "Settings" | "AuditLog";
+  table: "Score" | "Team" | "User" | "Criteria" | "Settings" | "AuditLog" | "Event";
   action: string;
   timestamp: number;
+  eventId?: string;
   data?: any;
 }
 

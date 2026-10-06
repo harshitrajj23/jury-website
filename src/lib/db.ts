@@ -1,7 +1,7 @@
 "use server";
 
 import bcrypt from "bcryptjs";
-import type { Judge, Team, ScoringCriteria, ScoreRecord, AppConfig, LeaderboardEntry, AuditLogEntry } from "./types";
+import type { Judge, Team, ScoringCriteria, ScoreRecord, AppConfig, LeaderboardEntry, EventItem } from "./types";
 import { getDb } from "./neonClient";
 import { broadcastRealtimeEvent } from "./redisClient";
 
@@ -14,7 +14,7 @@ export interface ActionResult<T = void> {
 let tablesInitialized = false;
 
 /**
- * Ensures native tables exist in Neon Postgres.
+ * Ensures native tables exist in Neon Postgres with Multi-Event architecture.
  * Guarded to run only once and avoid runtime DDL overhead.
  */
 export async function initDatabase(): Promise<ActionResult> {
@@ -26,7 +26,7 @@ export async function initDatabase(): Promise<ActionResult> {
     const check = await sql`
       SELECT count(*)::int as count 
       FROM information_schema.tables 
-      WHERE table_schema = 'public' AND table_name = 'User';
+      WHERE table_schema = 'public' AND table_name = 'Event';
     `;
 
     if (check && check[0]?.count > 0) {
@@ -34,7 +34,24 @@ export async function initDatabase(): Promise<ActionResult> {
       return { success: true };
     }
 
-    // Initialize core schema if empty database
+    // Initialize core schema with Multi-Event support
+    await sql`
+      CREATE TABLE IF NOT EXISTS "Event" (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        subtitle TEXT NOT NULL DEFAULT '',
+        organizer TEXT NOT NULL DEFAULT '',
+        logo TEXT NOT NULL DEFAULT '',
+        "timerDuration" INTEGER NOT NULL DEFAULT 300,
+        "judgingOpen" BOOLEAN NOT NULL DEFAULT true,
+        "leaderboardUnlocked" BOOLEAN NOT NULL DEFAULT false,
+        "finaleReady" BOOLEAN NOT NULL DEFAULT false,
+        active BOOLEAN NOT NULL DEFAULT true,
+        "createdAt" TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `;
+
     await sql`
       CREATE TABLE IF NOT EXISTS "User" (
         id TEXT PRIMARY KEY,
@@ -43,6 +60,7 @@ export async function initDatabase(): Promise<ActionResult> {
         "passwordHash" TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'judge',
         completed BOOLEAN NOT NULL DEFAULT false,
+        "eventId" TEXT NOT NULL DEFAULT 'default_event',
         "createdAt" TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
         "updatedAt" TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
@@ -56,6 +74,7 @@ export async function initDatabase(): Promise<ActionResult> {
         "teamCode" TEXT NOT NULL,
         "tableNumber" INTEGER NOT NULL DEFAULT 1,
         members TEXT NOT NULL DEFAULT '[]',
+        "eventId" TEXT NOT NULL DEFAULT 'default_event',
         "createdAt" TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
         "updatedAt" TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
@@ -70,6 +89,7 @@ export async function initDatabase(): Promise<ActionResult> {
         weight DOUBLE PRECISION NOT NULL DEFAULT 1.0,
         "orderIndex" INTEGER NOT NULL DEFAULT 0,
         active BOOLEAN NOT NULL DEFAULT true,
+        "eventId" TEXT NOT NULL DEFAULT 'default_event',
         "createdAt" TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
     `;
@@ -82,6 +102,7 @@ export async function initDatabase(): Promise<ActionResult> {
         "criteriaId" TEXT NOT NULL,
         score INTEGER NOT NULL CHECK (score >= 1 AND score <= 10),
         comment TEXT NOT NULL DEFAULT '',
+        "eventId" TEXT NOT NULL DEFAULT 'default_event',
         "createdAt" TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
         "updatedAt" TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
@@ -93,7 +114,7 @@ export async function initDatabase(): Promise<ActionResult> {
         "leaderboardUnlocked" BOOLEAN NOT NULL DEFAULT false,
         "judgingOpen" BOOLEAN NOT NULL DEFAULT true,
         "finaleReady" BOOLEAN NOT NULL DEFAULT false,
-        "timerDuration" INTEGER NOT NULL DEFAULT 480,
+        "timerDuration" INTEGER NOT NULL DEFAULT 300,
         "updatedAt" TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
     `;
@@ -105,13 +126,21 @@ export async function initDatabase(): Promise<ActionResult> {
         action TEXT NOT NULL,
         details TEXT NOT NULL DEFAULT '',
         "ipAddress" TEXT NOT NULL DEFAULT '',
+        "eventId" TEXT DEFAULT 'default_event',
         "createdAt" TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
     `;
 
+    // Ensure default event and global settings exist
+    await sql`
+      INSERT INTO "Event" (id, name, subtitle, organizer, logo, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active)
+      VALUES ('default_event', 'PALS Hackathon 2026', 'BMSIT Innovation Challenge', 'PALS Consortium', '/pals-logo.svg', 300, true, false, false, true)
+      ON CONFLICT (id) DO NOTHING;
+    `;
+
     await sql`
       INSERT INTO "Settings" (id, "leaderboardUnlocked", "judgingOpen", "finaleReady", "timerDuration", "updatedAt")
-      VALUES ('global', false, true, false, 480, NOW())
+      VALUES ('global', false, true, false, 300, NOW())
       ON CONFLICT (id) DO NOTHING;
     `;
 
@@ -124,28 +153,218 @@ export async function initDatabase(): Promise<ActionResult> {
 }
 
 // LOG ACTION HELPER
-export async function logAudit(action: string, details: string = "", userId?: string): Promise<void> {
+export async function logAudit(action: string, details: string = "", userId?: string, eventId?: string): Promise<void> {
   try {
     const sql = getDb();
     const id = `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     await sql`
-      INSERT INTO "AuditLog" (id, "userId", action, details, "ipAddress", "createdAt")
-      VALUES (${id}, ${userId || null}, ${action}, ${details}, '127.0.0.1', NOW())
+      INSERT INTO "AuditLog" (id, "userId", action, details, "ipAddress", "eventId", "createdAt")
+      VALUES (${id}, ${userId || null}, ${action}, ${details}, '127.0.0.1', ${eventId || 'default_event'}, NOW())
     `;
   } catch (e) {
     console.error("Audit log error:", e);
   }
 }
 
-// JUDGES / USERS
-export async function getJudges(): Promise<Judge[]> {
+// ==============================================================
+// EVENTS MANAGEMENT
+// ==============================================================
+
+export async function getEvents(): Promise<EventItem[]> {
   try {
     const sql = getDb();
     const rows = await sql`
-      SELECT id, name, email, "passwordHash", role, completed 
-      FROM "User" 
-      ORDER BY name ASC;
+      SELECT id, name, subtitle, organizer, logo, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active, "createdAt", "updatedAt"
+      FROM "Event"
+      WHERE active = true
+      ORDER BY "createdAt" ASC;
     `;
+
+    return (rows || []).map((e: any) => ({
+      id: e.id,
+      name: e.name,
+      subtitle: e.subtitle || "",
+      organizer: e.organizer || "",
+      logo: e.logo || "",
+      timerDuration: typeof e.timerDuration === "number" ? e.timerDuration : 300,
+      judgingOpen: e.judgingOpen !== false,
+      leaderboardUnlocked: Boolean(e.leaderboardUnlocked),
+      finaleReady: Boolean(e.finaleReady),
+      active: Boolean(e.active),
+      createdAt: e.createdAt ? new Date(e.createdAt).toISOString() : undefined,
+      updatedAt: e.updatedAt ? new Date(e.updatedAt).toISOString() : undefined,
+    }));
+  } catch (error) {
+    console.error("Neon DB Error (getEvents):", error);
+    return [
+      {
+        id: "default_event",
+        name: "PALS Hackathon 2026",
+        subtitle: "BMSIT Innovation Challenge",
+        organizer: "PALS Consortium",
+        logo: "/pals-logo.svg",
+        timerDuration: 300,
+        judgingOpen: true,
+        leaderboardUnlocked: false,
+        active: true,
+      },
+    ];
+  }
+}
+
+export async function getEvent(eventId: string = "default_event"): Promise<EventItem | null> {
+  try {
+    const sql = getDb();
+    const rows = await sql`
+      SELECT id, name, subtitle, organizer, logo, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active
+      FROM "Event"
+      WHERE id = ${eventId}
+      LIMIT 1;
+    `;
+    if (!rows || rows.length === 0) return null;
+    const e = rows[0];
+    return {
+      id: e.id,
+      name: e.name,
+      subtitle: e.subtitle || "",
+      organizer: e.organizer || "",
+      logo: e.logo || "",
+      timerDuration: typeof e.timerDuration === "number" ? e.timerDuration : 300,
+      judgingOpen: e.judgingOpen !== false,
+      leaderboardUnlocked: Boolean(e.leaderboardUnlocked),
+      finaleReady: Boolean(e.finaleReady),
+      active: Boolean(e.active),
+    };
+  } catch (error) {
+    console.error("Neon DB Error (getEvent):", error);
+    return null;
+  }
+}
+
+export async function createEvent(eventData: Partial<EventItem>): Promise<ActionResult<EventItem>> {
+  try {
+    const sql = getDb();
+    const id = eventData.id || `evt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const name = (eventData.name || "New Event").trim();
+    const subtitle = (eventData.subtitle || "").trim();
+    const organizer = (eventData.organizer || "").trim();
+    const logo = (eventData.logo || "").trim();
+    const timerDuration = Math.max(60, Math.min(3600, eventData.timerDuration || 300));
+
+    await sql`
+      INSERT INTO "Event" (id, name, subtitle, organizer, logo, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active, "createdAt", "updatedAt")
+      VALUES (${id}, ${name}, ${subtitle}, ${organizer}, ${logo}, ${timerDuration}, true, false, false, true, NOW(), NOW())
+    `;
+
+    // Clone base criteria for this event if none exist
+    const baseCriteria = await sql`
+      SELECT name, description, "maxScore", weight, "orderIndex" 
+      FROM "Criteria" 
+      WHERE "eventId" = 'default_event' AND active = true;
+    `;
+    if (baseCriteria && baseCriteria.length > 0) {
+      for (const c of baseCriteria) {
+        const critId = `cr_${id}_${c.orderIndex}`;
+        await sql`
+          INSERT INTO "Criteria" (id, name, description, "maxScore", weight, "orderIndex", active, "eventId", "createdAt")
+          VALUES (${critId}, ${c.name}, ${c.description || ''}, ${c.maxScore || 10}, ${c.weight || 1.0}, ${c.orderIndex || 0}, true, ${id}, NOW())
+          ON CONFLICT (id) DO NOTHING;
+        `;
+      }
+    }
+
+    const created: EventItem = {
+      id,
+      name,
+      subtitle,
+      organizer,
+      logo,
+      timerDuration,
+      judgingOpen: true,
+      leaderboardUnlocked: false,
+      active: true,
+    };
+
+    await logAudit("CREATE_EVENT", `Created event "${name}" (${id})`, undefined, id);
+    await broadcastRealtimeEvent({ table: "Event", action: "CREATE_EVENT", eventId: id, data: created });
+
+    return { success: true, data: created };
+  } catch (err: any) {
+    console.error("Neon DB Error (createEvent):", err);
+    return { success: false, error: err?.message || "Failed to create event." };
+  }
+}
+
+export async function updateEvent(eventId: string, updates: Partial<EventItem>): Promise<ActionResult<EventItem>> {
+  try {
+    const sql = getDb();
+    const existing = await getEvent(eventId);
+    if (!existing) return { success: false, error: "Event not found." };
+
+    const name = updates.name !== undefined ? updates.name.trim() : existing.name;
+    const subtitle = updates.subtitle !== undefined ? updates.subtitle.trim() : existing.subtitle;
+    const organizer = updates.organizer !== undefined ? updates.organizer.trim() : existing.organizer;
+    const logo = updates.logo !== undefined ? updates.logo.trim() : existing.logo;
+    const timerDuration = updates.timerDuration !== undefined ? Math.max(60, Math.min(3600, updates.timerDuration)) : existing.timerDuration;
+    const judgingOpen = updates.judgingOpen !== undefined ? updates.judgingOpen : existing.judgingOpen;
+    const leaderboardUnlocked = updates.leaderboardUnlocked !== undefined ? updates.leaderboardUnlocked : existing.leaderboardUnlocked;
+
+    await sql`
+      UPDATE "Event"
+      SET name = ${name},
+          subtitle = ${subtitle},
+          organizer = ${organizer},
+          logo = ${logo},
+          "timerDuration" = ${timerDuration},
+          "judgingOpen" = ${judgingOpen},
+          "leaderboardUnlocked" = ${leaderboardUnlocked},
+          "updatedAt" = NOW()
+      WHERE id = ${eventId};
+    `;
+
+    const updated: EventItem = {
+      ...existing,
+      name,
+      subtitle,
+      organizer,
+      logo,
+      timerDuration,
+      judgingOpen,
+      leaderboardUnlocked,
+    };
+
+    await logAudit("UPDATE_EVENT", `Updated event "${name}" (${eventId})`, undefined, eventId);
+    await broadcastRealtimeEvent({ table: "Event", action: "UPDATE_EVENT", eventId, data: updated });
+
+    return { success: true, data: updated };
+  } catch (err: any) {
+    console.error("Neon DB Error (updateEvent):", err);
+    return { success: false, error: err?.message || "Failed to update event." };
+  }
+}
+
+// ==============================================================
+// JUDGES / USERS
+// ==============================================================
+
+export async function getJudges(eventId?: string): Promise<Judge[]> {
+  try {
+    const sql = getDb();
+    let rows;
+    if (eventId && eventId !== "all") {
+      rows = await sql`
+        SELECT id, name, email, "passwordHash", role, completed, "eventId"
+        FROM "User" 
+        WHERE "eventId" = ${eventId} OR role = 'admin'
+        ORDER BY name ASC;
+      `;
+    } else {
+      rows = await sql`
+        SELECT id, name, email, "passwordHash", role, completed, "eventId"
+        FROM "User" 
+        ORDER BY name ASC;
+      `;
+    }
 
     return (rows || []).map((u: any) => ({
       id: u.id,
@@ -156,6 +375,7 @@ export async function getJudges(): Promise<Judge[]> {
       passwordHash: u.passwordHash,
       role: u.role,
       completed: Boolean(u.completed),
+      eventId: u.eventId || 'default_event',
     }));
   } catch (error) {
     console.error("Neon DB Error (getJudges):", error);
@@ -163,7 +383,7 @@ export async function getJudges(): Promise<Judge[]> {
   }
 }
 
-export async function addJudge(judge: Omit<Judge, "id">): Promise<ActionResult<Judge>> {
+export async function addJudge(judge: Omit<Judge, "id">, eventId?: string): Promise<ActionResult<Judge>> {
   try {
     const sql = getDb();
     const usernameRaw = judge.username.trim();
@@ -173,6 +393,7 @@ export async function addJudge(judge: Omit<Judge, "id">): Promise<ActionResult<J
     }
 
     const email = usernameRaw.includes('@') ? usernameRaw.toLowerCase() : `${usernameRaw.toLowerCase()}@pals.hackathon`;
+    const targetEventId = judge.eventId || eventId || 'default_event';
 
     // Check if user already exists
     const existing = await sql`
@@ -186,12 +407,12 @@ export async function addJudge(judge: Omit<Judge, "id">): Promise<ActionResult<J
     const passwordHash = judge.password ? bcrypt.hashSync(judge.password, 10) : bcrypt.hashSync("123456", 10);
 
     await sql`
-      INSERT INTO "User" (id, name, email, "passwordHash", role, completed, "createdAt", "updatedAt")
-      VALUES (${id}, ${judge.name.trim()}, ${email}, ${passwordHash}, 'judge', false, NOW(), NOW())
+      INSERT INTO "User" (id, name, email, "passwordHash", role, completed, "eventId", "createdAt", "updatedAt")
+      VALUES (${id}, ${judge.name.trim()}, ${email}, ${passwordHash}, 'judge', false, ${targetEventId}, NOW(), NOW())
     `;
 
-    await logAudit("REGISTER_JUDGE", `Added judge ${judge.name} (${email})`, id);
-    await broadcastRealtimeEvent({ table: "User", action: "ADD_JUDGE", data: { id, name: judge.name, email } });
+    await logAudit("REGISTER_JUDGE", `Added judge ${judge.name} (${email}) for event ${targetEventId}`, id, targetEventId);
+    await broadcastRealtimeEvent({ table: "User", action: "ADD_JUDGE", eventId: targetEventId, data: { id, name: judge.name, email, eventId: targetEventId } });
 
     const newJudge: Judge = {
       id,
@@ -201,6 +422,7 @@ export async function addJudge(judge: Omit<Judge, "id">): Promise<ActionResult<J
       designation: judge.designation || 'Jurist',
       role: 'judge',
       completed: false,
+      eventId: targetEventId,
     };
 
     return { success: true, data: newJudge };
@@ -213,10 +435,13 @@ export async function addJudge(judge: Omit<Judge, "id">): Promise<ActionResult<J
 export async function removeJudge(id: string): Promise<ActionResult> {
   try {
     const sql = getDb();
+    const user = await sql`SELECT "eventId" FROM "User" WHERE id = ${id} LIMIT 1;`;
+    const eventId = user[0]?.eventId || 'default_event';
+
     await sql`DELETE FROM "Score" WHERE "judgeId" = ${id};`;
     await sql`DELETE FROM "User" WHERE id = ${id};`;
-    await logAudit("REMOVE_JUDGE", `Removed judge ${id}`);
-    await broadcastRealtimeEvent({ table: "User", action: "REMOVE_JUDGE", data: { id } });
+    await logAudit("REMOVE_JUDGE", `Removed judge ${id}`, undefined, eventId);
+    await broadcastRealtimeEvent({ table: "User", action: "REMOVE_JUDGE", eventId, data: { id } });
     return { success: true };
   } catch (err: any) {
     console.error("Neon DB Error (removeJudge):", err);
@@ -224,15 +449,29 @@ export async function removeJudge(id: string): Promise<ActionResult> {
   }
 }
 
+// ==============================================================
 // TEAMS
-export async function getTeams(): Promise<Team[]> {
+// ==============================================================
+
+export async function getTeams(eventId?: string): Promise<Team[]> {
   try {
     const sql = getDb();
-    const rows = await sql`
-      SELECT id, "teamName", "projectName", "teamCode", "tableNumber", members, "createdAt" 
-      FROM "Team" 
-      ORDER BY "teamName" ASC;
-    `;
+    let rows;
+    if (eventId && eventId !== "all") {
+      rows = await sql`
+        SELECT id, "teamName", "projectName", "teamCode", "tableNumber", members, "eventId", "createdAt" 
+        FROM "Team" 
+        WHERE "eventId" = ${eventId}
+        ORDER BY "teamName" ASC;
+      `;
+    } else {
+      rows = await sql`
+        SELECT id, "teamName", "projectName", "teamCode", "tableNumber", members, "eventId", "createdAt" 
+        FROM "Team" 
+        ORDER BY "teamName" ASC;
+      `;
+    }
+
     return (rows || []).map((t: any) => ({
       id: t.id,
       name: t.teamName,
@@ -241,6 +480,7 @@ export async function getTeams(): Promise<Team[]> {
       teamCode: t.teamCode,
       tableNumber: t.tableNumber,
       members: t.members,
+      eventId: t.eventId || 'default_event',
     }));
   } catch (error) {
     console.error("Neon DB Error (getTeams):", error);
@@ -248,7 +488,7 @@ export async function getTeams(): Promise<Team[]> {
   }
 }
 
-export async function addTeam(name: string): Promise<ActionResult<Team>> {
+export async function addTeam(name: string, eventId: string = "default_event"): Promise<ActionResult<Team>> {
   try {
     const sql = getDb();
     const trimmed = name.trim();
@@ -256,12 +496,12 @@ export async function addTeam(name: string): Promise<ActionResult<Team>> {
     const teamCode = `TEAM-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
     await sql`
-      INSERT INTO "Team" (id, "teamName", "projectName", "teamCode", "tableNumber", members, "createdAt", "updatedAt")
-      VALUES (${id}, ${trimmed}, ${trimmed}, ${teamCode}, 1, '[]', NOW(), NOW())
+      INSERT INTO "Team" (id, "teamName", "projectName", "teamCode", "tableNumber", members, "eventId", "createdAt", "updatedAt")
+      VALUES (${id}, ${trimmed}, ${trimmed}, ${teamCode}, 1, '[]', ${eventId}, NOW(), NOW())
     `;
 
-    await logAudit("ADD_TEAM", `Registered team ${trimmed} (${teamCode})`);
-    await broadcastRealtimeEvent({ table: "Team", action: "ADD_TEAM", data: { id, name: trimmed } });
+    await logAudit("ADD_TEAM", `Registered team ${trimmed} (${teamCode}) for event ${eventId}`, undefined, eventId);
+    await broadcastRealtimeEvent({ table: "Team", action: "ADD_TEAM", eventId, data: { id, name: trimmed, eventId } });
 
     return {
       success: true,
@@ -272,6 +512,7 @@ export async function addTeam(name: string): Promise<ActionResult<Team>> {
         projectName: trimmed,
         teamCode,
         tableNumber: 1,
+        eventId,
       },
     };
   } catch (err: any) {
@@ -283,10 +524,13 @@ export async function addTeam(name: string): Promise<ActionResult<Team>> {
 export async function removeTeam(id: string): Promise<ActionResult> {
   try {
     const sql = getDb();
+    const team = await sql`SELECT "eventId" FROM "Team" WHERE id = ${id} LIMIT 1;`;
+    const eventId = team[0]?.eventId || 'default_event';
+
     await sql`DELETE FROM "Score" WHERE "teamId" = ${id};`;
     await sql`DELETE FROM "Team" WHERE id = ${id};`;
-    await logAudit("REMOVE_TEAM", `Removed team ${id}`);
-    await broadcastRealtimeEvent({ table: "Team", action: "REMOVE_TEAM", data: { id } });
+    await logAudit("REMOVE_TEAM", `Removed team ${id}`, undefined, eventId);
+    await broadcastRealtimeEvent({ table: "Team", action: "REMOVE_TEAM", eventId, data: { id } });
     return { success: true };
   } catch (err: any) {
     console.error("Neon DB Error (removeTeam):", err);
@@ -297,6 +541,9 @@ export async function removeTeam(id: string): Promise<ActionResult> {
 export async function toggleDisqualifyTeam(teamId: string, teamName: string, disqualify: boolean): Promise<ActionResult> {
   try {
     const sql = getDb();
+    const team = await sql`SELECT "eventId" FROM "Team" WHERE id = ${teamId} LIMIT 1;`;
+    const eventId = team[0]?.eventId || 'default_event';
+
     let newName = teamName;
     if (disqualify && !teamName.startsWith("[DISQUALIFIED]")) {
       newName = `[DISQUALIFIED] ${teamName}`;
@@ -304,8 +551,8 @@ export async function toggleDisqualifyTeam(teamId: string, teamName: string, dis
       newName = teamName.replace("[DISQUALIFIED] ", "");
     }
     await sql`UPDATE "Team" SET "teamName" = ${newName}, "updatedAt" = NOW() WHERE id = ${teamId};`;
-    await logAudit(disqualify ? "DISQUALIFY_TEAM" : "REINSTATE_TEAM", `${teamName} -> ${newName}`);
-    await broadcastRealtimeEvent({ table: "Team", action: "TOGGLE_DISQUALIFY", data: { id: teamId, name: newName } });
+    await logAudit(disqualify ? "DISQUALIFY_TEAM" : "REINSTATE_TEAM", `${teamName} -> ${newName}`, undefined, eventId);
+    await broadcastRealtimeEvent({ table: "Team", action: "TOGGLE_DISQUALIFY", eventId, data: { id: teamId, name: newName } });
     return { success: true };
   } catch (err: any) {
     console.error("Neon DB Error (toggleDisqualifyTeam):", err);
@@ -313,17 +560,29 @@ export async function toggleDisqualifyTeam(teamId: string, teamName: string, dis
   }
 }
 
-// CONFIG & CRITERIA
-export async function getConfig(): Promise<AppConfig> {
+// ==============================================================
+// CONFIG, TIMER & CRITERIA
+// ==============================================================
+
+export async function getConfig(eventId: string = "default_event"): Promise<AppConfig> {
   try {
     const sql = getDb();
 
-    const [settingsRows, criteriaRows] = await Promise.all([
+    // Query event-specific settings if present, falling back to global settings
+    const [eventRows, settingsRows, criteriaRows] = await Promise.all([
+      sql`SELECT id, name, subtitle, organizer, logo, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady" FROM "Event" WHERE id = ${eventId} LIMIT 1;`,
       sql`SELECT "leaderboardUnlocked", "judgingOpen", "finaleReady", "timerDuration" FROM "Settings" WHERE id = 'global' LIMIT 1;`,
-      sql`SELECT id, name, description, "maxScore", weight, "orderIndex", active FROM "Criteria" WHERE active = true ORDER BY "orderIndex" ASC;`,
+      sql`SELECT id, name, description, "maxScore", weight, "orderIndex", active, "eventId" FROM "Criteria" WHERE active = true AND ("eventId" = ${eventId} OR "eventId" = 'default_event') ORDER BY "orderIndex" ASC;`,
     ]);
 
-    const settings = settingsRows && settingsRows.length > 0 ? settingsRows[0] : { leaderboardUnlocked: false, judgingOpen: true, finaleReady: false, timerDuration: 480 };
+    const ev = eventRows && eventRows.length > 0 ? eventRows[0] : null;
+    const settings = settingsRows && settingsRows.length > 0 ? settingsRows[0] : { leaderboardUnlocked: false, judgingOpen: true, finaleReady: false, timerDuration: 300 };
+
+    const timerDuration = ev ? ev.timerDuration : (typeof settings.timerDuration === 'number' ? settings.timerDuration : 300);
+    const judgingOpen = ev ? ev.judgingOpen !== false : settings.judgingOpen !== false;
+    const announceResults = ev ? Boolean(ev.leaderboardUnlocked) : Boolean(settings.leaderboardUnlocked);
+    const finaleReady = ev ? Boolean(ev.finaleReady) : Boolean(settings.finaleReady);
+
     const criteriaList: ScoringCriteria[] = (criteriaRows || []).map((c: any) => ({
       id: c.id,
       name: c.name,
@@ -332,39 +591,69 @@ export async function getConfig(): Promise<AppConfig> {
       weight: typeof c.weight === 'number' ? c.weight : parseFloat(c.weight) || 1.0,
       orderIndex: c.orderIndex || 0,
       active: c.active !== false,
+      eventId: c.eventId || eventId,
     }));
 
+    const eventItem: EventItem | undefined = ev ? {
+      id: ev.id,
+      name: ev.name,
+      subtitle: ev.subtitle || "",
+      organizer: ev.organizer || "",
+      logo: ev.logo || "",
+      timerDuration,
+      judgingOpen,
+      leaderboardUnlocked: announceResults,
+      finaleReady,
+      active: true,
+    } : undefined;
+
     return {
-      announceResults: Boolean(settings.leaderboardUnlocked),
-      judgingOpen: settings.judgingOpen !== false,
-      finaleReady: Boolean(settings.finaleReady),
-      timerDuration: typeof settings.timerDuration === 'number' ? settings.timerDuration : 480,
+      announceResults,
+      judgingOpen,
+      finaleReady,
+      timerDuration,
       criteriaList,
+      eventId,
+      event: eventItem,
     };
   } catch (error) {
     console.error("Neon DB Error (getConfig):", error);
     return {
       announceResults: false,
       criteriaList: [],
-      timerDuration: 480,
+      timerDuration: 300,
       judgingOpen: true,
       finaleReady: false,
+      eventId,
     };
   }
 }
 
-export async function updateTimerDuration(durationSeconds: number): Promise<ActionResult> {
+export async function updateTimerDuration(durationSeconds: number, eventId: string = "default_event"): Promise<ActionResult> {
   try {
     const sql = getDb();
     const clamped = Math.max(60, Math.min(3600, Math.round(durationSeconds)));
+
+    // Update in Event table
     await sql`
-      UPDATE "Settings" 
+      UPDATE "Event" 
       SET "timerDuration" = ${clamped},
           "updatedAt" = NOW()
-      WHERE id = 'global';
+      WHERE id = ${eventId};
     `;
-    await logAudit("UPDATE_TIMER", `Timer duration set to ${clamped} seconds`);
-    await broadcastRealtimeEvent({ table: "Settings", action: "UPDATE_CONFIG", data: { timerDuration: clamped } });
+
+    // Also update global Settings for backward compatibility if default event
+    if (eventId === "default_event") {
+      await sql`
+        UPDATE "Settings" 
+        SET "timerDuration" = ${clamped},
+            "updatedAt" = NOW()
+        WHERE id = 'global';
+      `;
+    }
+
+    await logAudit("UPDATE_TIMER", `Timer duration set to ${clamped}s (${Math.round(clamped / 60)} mins) for event ${eventId}`, undefined, eventId);
+    await broadcastRealtimeEvent({ table: "Settings", action: "UPDATE_CONFIG", eventId, data: { timerDuration: clamped, eventId } });
     return { success: true };
   } catch (err: any) {
     console.error("Neon DB Error (updateTimerDuration):", err);
@@ -372,19 +661,34 @@ export async function updateTimerDuration(durationSeconds: number): Promise<Acti
   }
 }
 
-export async function updateConfig(config: AppConfig): Promise<ActionResult> {
+export async function updateConfig(config: AppConfig, eventId: string = "default_event"): Promise<ActionResult> {
   try {
     const sql = getDb();
+    const duration = config.timerDuration || 300;
+
     await sql`
-      UPDATE "Settings" 
+      UPDATE "Event" 
       SET "leaderboardUnlocked" = ${config.announceResults},
           "judgingOpen" = ${config.judgingOpen ?? true},
           "finaleReady" = ${config.finaleReady ?? false},
-          "timerDuration" = ${config.timerDuration || 480},
+          "timerDuration" = ${duration},
           "updatedAt" = NOW()
-      WHERE id = 'global';
+      WHERE id = ${eventId};
     `;
-    await broadcastRealtimeEvent({ table: "Settings", action: "UPDATE_CONFIG", data: config });
+
+    if (eventId === "default_event") {
+      await sql`
+        UPDATE "Settings" 
+        SET "leaderboardUnlocked" = ${config.announceResults},
+            "judgingOpen" = ${config.judgingOpen ?? true},
+            "finaleReady" = ${config.finaleReady ?? false},
+            "timerDuration" = ${duration},
+            "updatedAt" = NOW()
+        WHERE id = 'global';
+      `;
+    }
+
+    await broadcastRealtimeEvent({ table: "Settings", action: "UPDATE_CONFIG", eventId, data: config });
     return { success: true };
   } catch (err: any) {
     console.error("Neon DB Error (updateConfig):", err);
@@ -392,17 +696,27 @@ export async function updateConfig(config: AppConfig): Promise<ActionResult> {
   }
 }
 
-export async function toggleAnnounceResults(announce: boolean): Promise<ActionResult> {
+export async function toggleAnnounceResults(announce: boolean, eventId: string = "default_event"): Promise<ActionResult> {
   try {
     const sql = getDb();
     await sql`
-      UPDATE "Settings" 
+      UPDATE "Event" 
       SET "leaderboardUnlocked" = ${announce},
           "updatedAt" = NOW() 
-      WHERE id = 'global';
+      WHERE id = ${eventId};
     `;
-    await logAudit(announce ? "UNLOCK_LEADERBOARD" : "LOCK_LEADERBOARD", `Leaderboard announced: ${announce}`);
-    await broadcastRealtimeEvent({ table: "Settings", action: "TOGGLE_BROADCAST", data: { announce } });
+
+    if (eventId === "default_event") {
+      await sql`
+        UPDATE "Settings" 
+        SET "leaderboardUnlocked" = ${announce},
+            "updatedAt" = NOW() 
+        WHERE id = 'global';
+      `;
+    }
+
+    await logAudit(announce ? "UNLOCK_LEADERBOARD" : "LOCK_LEADERBOARD", `Leaderboard announced: ${announce} for event ${eventId}`, undefined, eventId);
+    await broadcastRealtimeEvent({ table: "Settings", action: "TOGGLE_BROADCAST", eventId, data: { announce, eventId } });
     return { success: true };
   } catch (err: any) {
     console.error("Neon DB Error (toggleAnnounceResults):", err);
@@ -410,7 +724,7 @@ export async function toggleAnnounceResults(announce: boolean): Promise<ActionRe
   }
 }
 
-export async function updateCriteria(criteriaList: ScoringCriteria[]): Promise<ActionResult> {
+export async function updateCriteria(criteriaList: ScoringCriteria[], eventId: string = "default_event"): Promise<ActionResult> {
   try {
     const sql = getDb();
 
@@ -420,36 +734,37 @@ export async function updateCriteria(criteriaList: ScoringCriteria[]): Promise<A
 
     const activeIds: string[] = [];
 
-    // Upsert each criteria in list as active
+    // Upsert each criteria in list as active for this event
     for (let i = 0; i < criteriaList.length; i++) {
       const c = criteriaList[i];
-      const id = c.id || `crit_${Date.now()}_${i}`;
+      const id = c.id || `crit_${eventId}_${Date.now()}_${i}`;
       activeIds.push(id);
 
       await sql`
-        INSERT INTO "Criteria" (id, name, description, "maxScore", weight, "orderIndex", active, "createdAt")
-        VALUES (${id}, ${c.name}, ${c.description || ''}, ${c.maxScore || 10}, ${c.weight || 1.0}, ${i}, true, NOW())
+        INSERT INTO "Criteria" (id, name, description, "maxScore", weight, "orderIndex", active, "eventId", "createdAt")
+        VALUES (${id}, ${c.name}, ${c.description || ''}, ${c.maxScore || 10}, ${c.weight || 1.0}, ${i}, true, ${eventId}, NOW())
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name,
           description = EXCLUDED.description,
           "maxScore" = EXCLUDED."maxScore",
           weight = EXCLUDED.weight,
           "orderIndex" = EXCLUDED."orderIndex",
+          "eventId" = EXCLUDED."eventId",
           active = true;
       `;
     }
 
-    // Deactivate criteria no longer in the active list (preserves foreign key relations of historical scores)
+    // Deactivate criteria no longer in the active list for this event
     if (activeIds.length > 0) {
       await sql`
         UPDATE "Criteria" 
         SET active = false 
-        WHERE id != ALL(${activeIds}::text[]);
+        WHERE "eventId" = ${eventId} AND id != ALL(${activeIds}::text[]);
       `;
     }
 
-    await logAudit("UPDATE_CRITERIA", `Updated ${criteriaList.length} criteria`);
-    await broadcastRealtimeEvent({ table: "Criteria", action: "UPDATE_CRITERIA" });
+    await logAudit("UPDATE_CRITERIA", `Updated ${criteriaList.length} criteria for event ${eventId}`, undefined, eventId);
+    await broadcastRealtimeEvent({ table: "Criteria", action: "UPDATE_CRITERIA", eventId });
     return { success: true };
   } catch (err: any) {
     console.error("Neon DB Error (updateCriteria):", err);
@@ -457,21 +772,34 @@ export async function updateCriteria(criteriaList: ScoringCriteria[]): Promise<A
   }
 }
 
+// ==============================================================
 // SCORES & EVALUATIONS
+// ==============================================================
 
 /**
- * Returns all submitted evaluation scores across the entire event.
- * Used by Admin Matrix, CSV Export, and Leaderboard aggregation.
+ * Returns evaluation scores across an event.
+ * Scoped strictly to eventId when provided.
  */
-export async function getScores(): Promise<ScoreRecord[]> {
+export async function getScores(eventId?: string): Promise<ScoreRecord[]> {
   try {
     const sql = getDb();
-    const rows = await sql`
-      SELECT s.id, s."judgeId", s."teamId", s."criteriaId", s.score, s.comment, s."createdAt", c.weight
-      FROM "Score" s
-      LEFT JOIN "Criteria" c ON s."criteriaId" = c.id
-      ORDER BY s."createdAt" ASC;
-    `;
+    let rows;
+    if (eventId && eventId !== "all") {
+      rows = await sql`
+        SELECT s.id, s."judgeId", s."teamId", s."criteriaId", s.score, s.comment, s."eventId", s."createdAt", c.weight
+        FROM "Score" s
+        LEFT JOIN "Criteria" c ON s."criteriaId" = c.id
+        WHERE s."eventId" = ${eventId}
+        ORDER BY s."createdAt" ASC;
+      `;
+    } else {
+      rows = await sql`
+        SELECT s.id, s."judgeId", s."teamId", s."criteriaId", s.score, s.comment, s."eventId", s."createdAt", c.weight
+        FROM "Score" s
+        LEFT JOIN "Criteria" c ON s."criteriaId" = c.id
+        ORDER BY s."createdAt" ASC;
+      `;
+    }
 
     const grouped = new Map<string, ScoreRecord>();
 
@@ -484,6 +812,7 @@ export async function getScores(): Promise<ScoreRecord[]> {
           scores: {},
           totalScore: 0,
           weightedScore: 0,
+          eventId: r.eventId || 'default_event',
           submittedAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
           judgeSignOff: { name: "Jurist", designation: "Judge", date: new Date().toISOString() },
         });
@@ -507,19 +836,29 @@ export async function getScores(): Promise<ScoreRecord[]> {
 
 /**
  * Scoped query: returns ONLY the scores submitted by a specific judge.
- * Drastically reduces payload size and avoids unnecessary data transfer to the jury browser.
  */
-export async function getJudgeScores(judgeId: string): Promise<ScoreRecord[]> {
+export async function getJudgeScores(judgeId: string, eventId?: string): Promise<ScoreRecord[]> {
   try {
     if (!judgeId) return [];
     const sql = getDb();
-    const rows = await sql`
-      SELECT s.id, s."judgeId", s."teamId", s."criteriaId", s.score, s.comment, s."createdAt", c.weight
-      FROM "Score" s
-      LEFT JOIN "Criteria" c ON s."criteriaId" = c.id
-      WHERE s."judgeId" = ${judgeId}
-      ORDER BY s."createdAt" ASC;
-    `;
+    let rows;
+    if (eventId && eventId !== "all") {
+      rows = await sql`
+        SELECT s.id, s."judgeId", s."teamId", s."criteriaId", s.score, s.comment, s."eventId", s."createdAt", c.weight
+        FROM "Score" s
+        LEFT JOIN "Criteria" c ON s."criteriaId" = c.id
+        WHERE s."judgeId" = ${judgeId} AND s."eventId" = ${eventId}
+        ORDER BY s."createdAt" ASC;
+      `;
+    } else {
+      rows = await sql`
+        SELECT s.id, s."judgeId", s."teamId", s."criteriaId", s.score, s.comment, s."eventId", s."createdAt", c.weight
+        FROM "Score" s
+        LEFT JOIN "Criteria" c ON s."criteriaId" = c.id
+        WHERE s."judgeId" = ${judgeId}
+        ORDER BY s."createdAt" ASC;
+      `;
+    }
 
     const grouped = new Map<string, ScoreRecord>();
 
@@ -532,6 +871,7 @@ export async function getJudgeScores(judgeId: string): Promise<ScoreRecord[]> {
           scores: {},
           totalScore: 0,
           weightedScore: 0,
+          eventId: r.eventId || 'default_event',
           submittedAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
           judgeSignOff: { name: "Jurist", designation: "Judge", date: new Date().toISOString() },
         });
@@ -555,9 +895,9 @@ export async function getJudgeScores(judgeId: string): Promise<ScoreRecord[]> {
 
 /**
  * Atomically submits all criteria scores for a team in a SINGLE multi-row batch operation.
- * Includes strict server-side validation and accurate judge completion status calculation.
+ * Includes strict server-side validation and event-scoped judge completion calculation.
  */
-export async function submitScores(score: ScoreRecord): Promise<ActionResult> {
+export async function submitScores(score: ScoreRecord, eventId?: string): Promise<ActionResult> {
   try {
     if (!score || !score.teamId || !score.judgeId) {
       return { success: false, error: "VALIDATION_ERROR: Missing team or judge identifier." };
@@ -568,6 +908,16 @@ export async function submitScores(score: ScoreRecord): Promise<ActionResult> {
       return { success: false, error: "VALIDATION_ERROR: Evaluation scores cannot be empty." };
     }
 
+    const sql = getDb();
+
+    // Resolve eventId from score or parameter or team's eventId
+    let resolvedEventId: string = score.eventId || eventId || "";
+    if (!resolvedEventId) {
+      const teamRow = await sql`SELECT "eventId" FROM "Team" WHERE id = ${score.teamId} LIMIT 1;`;
+      resolvedEventId = (teamRow[0]?.eventId as string) || 'default_event';
+    }
+    const finalEventId: string = resolvedEventId || 'default_event';
+
     // 1. Strict Backend Score Validation
     const ids: string[] = [];
     const judgeIds: string[] = [];
@@ -575,6 +925,7 @@ export async function submitScores(score: ScoreRecord): Promise<ActionResult> {
     const critIds: string[] = [];
     const scoreVals: number[] = [];
     const comments: string[] = [];
+    const eventIds: string[] = [];
 
     for (const [criteriaId, rawVal] of scoreEntries) {
       const val = Number(rawVal);
@@ -592,13 +943,12 @@ export async function submitScores(score: ScoreRecord): Promise<ActionResult> {
       critIds.push(criteriaId);
       scoreVals.push(val);
       comments.push('');
+      eventIds.push(finalEventId);
     }
-
-    const sql = getDb();
 
     // 2. Single Atomic Multi-Row Batch INSERT / UPSERT (<250ms execution)
     await sql`
-      INSERT INTO "Score" (id, "judgeId", "teamId", "criteriaId", score, comment, "createdAt", "updatedAt")
+      INSERT INTO "Score" (id, "judgeId", "teamId", "criteriaId", score, comment, "eventId", "createdAt", "updatedAt")
       SELECT 
         unnest(${ids}::text[]),
         unnest(${judgeIds}::text[]),
@@ -606,18 +956,20 @@ export async function submitScores(score: ScoreRecord): Promise<ActionResult> {
         unnest(${critIds}::text[]),
         unnest(${scoreVals}::int[]),
         unnest(${comments}::text[]),
+        unnest(${eventIds}::text[]),
         NOW(),
         NOW()
       ON CONFLICT (id) DO UPDATE SET
         score = EXCLUDED.score,
         comment = EXCLUDED.comment,
+        "eventId" = EXCLUDED."eventId",
         "updatedAt" = NOW();
     `;
 
-    // 3. Accurate Judge Completion Calculation (Completed ONLY when ALL active teams evaluated)
+    // 3. Accurate Event-Scoped Judge Completion Calculation
     const [teamCountRes, evaluatedCountRes] = await Promise.all([
-      sql`SELECT count(*)::int as count FROM "Team" WHERE "teamName" NOT LIKE '[DISQUALIFIED]%';`,
-      sql`SELECT count(DISTINCT "teamId")::int as count FROM "Score" WHERE "judgeId" = ${score.judgeId};`,
+      sql`SELECT count(*)::int as count FROM "Team" WHERE "teamName" NOT LIKE '[DISQUALIFIED]%' AND "eventId" = ${finalEventId};`,
+      sql`SELECT count(DISTINCT "teamId")::int as count FROM "Score" WHERE "judgeId" = ${score.judgeId} AND "eventId" = ${finalEventId};`,
     ]);
 
     const totalActiveTeams = teamCountRes[0]?.count || 0;
@@ -631,8 +983,13 @@ export async function submitScores(score: ScoreRecord): Promise<ActionResult> {
       WHERE id = ${score.judgeId};
     `;
 
-    await logAudit("SUBMIT_SCORES", `Judge ${score.judgeId} submitted scores for team ${score.teamId} (${scoreEntries.length} criteria, total: ${score.totalScore})`, score.judgeId);
-    await broadcastRealtimeEvent({ table: "Score", action: "SUBMIT_SCORES", data: { teamId: score.teamId, judgeId: score.judgeId } });
+    await logAudit("SUBMIT_SCORES", `Judge ${score.judgeId} submitted scores for team ${score.teamId} (${scoreEntries.length} criteria, total: ${score.totalScore}) [Event: ${finalEventId}]`, score.judgeId, finalEventId);
+    await broadcastRealtimeEvent({ 
+      table: "Score", 
+      action: "SUBMIT_SCORES", 
+      eventId: finalEventId,
+      data: { teamId: score.teamId, judgeId: score.judgeId, eventId: finalEventId } 
+    });
 
     return { success: true };
   } catch (err: any) {
@@ -642,16 +999,16 @@ export async function submitScores(score: ScoreRecord): Promise<ActionResult> {
 }
 
 /**
- * Calculates leaderboard rankings using configured criterion weights.
- * Weighted Score = sum(score * criterion.weight) for each submission.
+ * Calculates leaderboard rankings strictly scoped to an event.
+ * Event A scores NEVER combine with Event B scores.
  */
-export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
+export async function getLeaderboard(eventId: string = "default_event"): Promise<LeaderboardEntry[]> {
   try {
     const [allTeams, judges, scores, config] = await Promise.all([
-      getTeams(),
-      getJudges(),
-      getScores(),
-      getConfig(),
+      getTeams(eventId),
+      getJudges(eventId),
+      getScores(eventId),
+      getConfig(eventId),
     ]);
 
     const criteriaList = config.criteriaList || [];
@@ -664,7 +1021,6 @@ export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
       totalWeight += w;
     });
 
-    // If criteria weights sum to ~1.0 (e.g. 10 criteria * 0.1 = 1.0), scale to standard 100-pt leaderboard display
     const weightMultiplier = (totalWeight > 0 && totalWeight <= 1.5) ? 10.0 : 1.0;
 
     const activeTeams = allTeams.filter((t) => !t.name.startsWith("[DISQUALIFIED]"));
@@ -675,7 +1031,6 @@ export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
       const judgeSubmissions = teamScores.map((ts) => {
         const judge = judges.find((j) => j.id === ts.judgeId);
         
-        // Calculate weighted score for this judge's submission
         let weightedTotal = 0;
         for (const [critId, val] of Object.entries(ts.scores || {})) {
           const crit = criteriaMap.get(critId);
@@ -693,7 +1048,6 @@ export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
         };
       });
 
-      // Compute average weighted score across all judges who evaluated this team
       const averageScore = teamScores.length > 0
         ? parseFloat(
             (
@@ -719,6 +1073,7 @@ export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
         averageScore,
         rawAverageScore,
         judgeSubmissions,
+        eventId,
       };
     });
 
@@ -739,15 +1094,24 @@ export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
   }
 }
 
-// Database Reset
-export async function resetDatabase(): Promise<ActionResult> {
+// Database Reset (scoped to event when provided)
+export async function resetDatabase(eventId?: string): Promise<ActionResult> {
   try {
     const sql = getDb();
-    await sql`DELETE FROM "Score";`;
-    await sql`UPDATE "User" SET completed = false;`;
-    await sql`UPDATE "Settings" SET "leaderboardUnlocked" = false, "finaleReady" = false WHERE id = 'global';`;
-    await logAudit("RESET_EVALUATIONS", "Erased all score submissions");
-    await broadcastRealtimeEvent({ table: "Score", action: "RESET_EVALUATIONS" });
+    if (eventId && eventId !== "all") {
+      await sql`DELETE FROM "Score" WHERE "eventId" = ${eventId};`;
+      await sql`UPDATE "User" SET completed = false WHERE "eventId" = ${eventId};`;
+      await sql`UPDATE "Event" SET "leaderboardUnlocked" = false, "finaleReady" = false WHERE id = ${eventId};`;
+      await logAudit("RESET_EVALUATIONS", `Erased evaluation scores for event ${eventId}`, undefined, eventId);
+      await broadcastRealtimeEvent({ table: "Score", action: "RESET_EVALUATIONS", eventId });
+    } else {
+      await sql`DELETE FROM "Score";`;
+      await sql`UPDATE "User" SET completed = false;`;
+      await sql`UPDATE "Event" SET "leaderboardUnlocked" = false, "finaleReady" = false;`;
+      await sql`UPDATE "Settings" SET "leaderboardUnlocked" = false, "finaleReady" = false WHERE id = 'global';`;
+      await logAudit("RESET_EVALUATIONS", "Erased all score submissions across all events");
+      await broadcastRealtimeEvent({ table: "Score", action: "RESET_EVALUATIONS" });
+    }
     return { success: true };
   } catch (err: any) {
     console.error("Neon DB Error (resetDatabase):", err);
@@ -755,14 +1119,14 @@ export async function resetDatabase(): Promise<ActionResult> {
   }
 }
 
-// User Authentication verification helper (Preserved as per Security Scope Exclusion)
+// User Authentication verification helper
 export async function verifyUserLogin(usernameOrEmail: string, passwordAttempt: string): Promise<ActionResult<Judge>> {
   try {
     const sql = getDb();
     const input = usernameOrEmail.trim().toLowerCase();
 
     const rows = await sql`
-      SELECT id, name, email, "passwordHash", role, completed 
+      SELECT id, name, email, "passwordHash", role, completed, "eventId"
       FROM "User" 
       WHERE LOWER(email) = ${input} 
          OR LOWER(email) = ${input + '@pals.hackathon'}
@@ -793,7 +1157,7 @@ export async function verifyUserLogin(usernameOrEmail: string, passwordAttempt: 
       return { success: false, error: "INVALID PASSWORD. ACCESS DENIED." };
     }
 
-    await logAudit("LOGIN", `User ${user.email} logged in`, user.id);
+    await logAudit("LOGIN", `User ${user.email} logged in`, user.id, user.eventId);
 
     return {
       success: true,
@@ -805,6 +1169,7 @@ export async function verifyUserLogin(usernameOrEmail: string, passwordAttempt: 
         designation: user.role === 'admin' ? 'Administrator' : 'Jurist',
         role: user.role,
         completed: Boolean(user.completed),
+        eventId: user.eventId || 'default_event',
       },
     };
   } catch (err: any) {

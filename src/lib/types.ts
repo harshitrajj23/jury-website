@@ -8,6 +8,7 @@ export interface Judge {
   passwordHash?: string;
   role?: string;
   completed?: boolean;
+  eventId?: string;
 }
 
 export interface Team {
@@ -18,6 +19,7 @@ export interface Team {
   teamCode?: string;
   tableNumber?: number;
   members?: string;
+  eventId?: string;
 }
 
 export interface ScoringCriteria {
@@ -28,6 +30,7 @@ export interface ScoringCriteria {
   weight?: number;
   orderIndex?: number;
   active?: boolean;
+  eventId?: string;
 }
 
 export interface JudgeSignOff {
@@ -44,6 +47,22 @@ export interface ScoreRecord {
   weightedScore?: number;
   submittedAt: string;
   judgeSignOff?: JudgeSignOff;
+  eventId?: string;
+}
+
+export interface EventItem {
+  id: string;
+  name: string;
+  subtitle?: string;
+  organizer?: string;
+  logo?: string;
+  timerDuration: number; // in seconds
+  judgingOpen: boolean;
+  leaderboardUnlocked: boolean;
+  finaleReady?: boolean;
+  active: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface AppConfig {
@@ -53,6 +72,8 @@ export interface AppConfig {
   disqualifiedTeams?: string[];
   judgingOpen?: boolean;
   finaleReady?: boolean;
+  eventId?: string;
+  event?: EventItem;
 }
 
 export interface LeaderboardEntry {
@@ -68,6 +89,7 @@ export interface LeaderboardEntry {
     totalScore: number;
     weightedScore?: number;
   }[];
+  eventId?: string;
 }
 
 export interface AuditLogEntry {
@@ -77,4 +99,5 @@ export interface AuditLogEntry {
   details: string;
   ipAddress: string;
   createdAt: string;
+  eventId?: string;
 }

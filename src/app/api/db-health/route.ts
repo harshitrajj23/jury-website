@@ -21,6 +21,7 @@ export async function GET() {
     const [result] = await sql`
       SELECT 
         NOW() as now,
+        (SELECT count(*)::int FROM "Event") as "eventCount",
         (SELECT count(*)::int FROM "User") as "judgeCount",
         (SELECT count(*)::int FROM "Team") as "teamCount",
         (SELECT count(*)::int FROM "Criteria" WHERE active = true) as "criteriaCount",
@@ -31,8 +32,9 @@ export async function GET() {
       status: "healthy",
       databaseUrlConfigured: true,
       connectedAt: result.now,
-      tables: ["User", "Team", "Criteria", "Score", "Settings", "AuditLog"],
+      tables: ["Event", "User", "Team", "Criteria", "Score", "Settings", "AuditLog"],
       data: {
+        events: result.eventCount,
         users_and_judges: result.judgeCount,
         teams: result.teamCount,
         criteria: result.criteriaCount,

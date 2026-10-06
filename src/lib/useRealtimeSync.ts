@@ -7,6 +7,8 @@ export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 interface UseRealtimeSyncOptions {
   /** Tables / keys to monitor for sync, e.g. ["Score", "Team", "Settings"] or ["*"] */
   tables: string[];
+  /** Optional eventId to scope realtime updates specifically to one event */
+  eventId?: string;
   /** Callback fired when data sync is triggered */
   onDataChange: () => void;
   /** Whether the sync connection should be active (default: true) */
@@ -24,6 +26,7 @@ interface UseRealtimeSyncOptions {
  */
 export function useRealtimeSync({
   tables,
+  eventId,
   onDataChange,
   enabled = true,
   intervalMs = 20000,
@@ -32,6 +35,7 @@ export function useRealtimeSync({
   const onDataChangeRef = useRef(onDataChange);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tablesRef = useRef(tables);
+  const eventIdRef = useRef(eventId);
   const statusRef = useRef<ConnectionStatus>("connecting");
 
   useEffect(() => {
@@ -41,6 +45,10 @@ export function useRealtimeSync({
   useEffect(() => {
     tablesRef.current = tables;
   }, [tables]);
+
+  useEffect(() => {
+    eventIdRef.current = eventId;
+  }, [eventId]);
 
   const triggerChange = useCallback((immediate: boolean = false) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -84,7 +92,12 @@ export function useRealtimeSync({
             monitoredTables.includes("*") ||
             monitoredTables.includes(payload.table)
           ) {
-            triggerChange(true); // Instant sub-50ms update
+            // Check event isolation:
+            const scopedEventId = eventIdRef.current;
+            // If this client is scoped to an event, and the payload carries a specific eventId, ensure it matches!
+            if (!scopedEventId || !payload.eventId || payload.eventId === scopedEventId) {
+              triggerChange(true); // Instant sub-50ms update
+            }
           }
         } catch (e) {
           triggerChange();
