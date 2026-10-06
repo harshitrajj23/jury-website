@@ -11,14 +11,14 @@ interface UseRealtimeSyncOptions {
   onDataChange: () => void;
   /** Whether the sync connection should be active (default: true) */
   enabled?: boolean;
-  /** Fallback background polling interval in milliseconds (default: 4000ms) */
+  /** Fallback background polling interval in milliseconds when SSE is offline (default: 20000ms) */
   intervalMs?: number;
 }
 
 /**
  * React hook that provides sub-second live real-time sync with Neon Postgres & Redis.
  * Connects to Server-Sent Events (SSE) `/api/realtime/sse` for instant push notifications (<50ms).
- * Maintains a safety-net background fallback polling interval in case SSE drops.
+ * Operates adaptive fallback polling ONLY when SSE is offline or disconnected, avoiding request storms.
  *
  * Returns the live connection status ("connected" | "connecting" | "disconnected") for UI indicators.
  */
@@ -26,12 +26,13 @@ export function useRealtimeSync({
   tables,
   onDataChange,
   enabled = true,
-  intervalMs = 4000,
+  intervalMs = 20000,
 }: UseRealtimeSyncOptions): ConnectionStatus {
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const onDataChangeRef = useRef(onDataChange);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tablesRef = useRef(tables);
+  const statusRef = useRef<ConnectionStatus>("connecting");
 
   useEffect(() => {
     onDataChangeRef.current = onDataChange;
@@ -54,7 +55,8 @@ export function useRealtimeSync({
 
   useEffect(() => {
     if (!enabled) {
-      Promise.resolve().then(() => setStatus("disconnected"));
+      setStatus("disconnected");
+      statusRef.current = "disconnected";
       return;
     }
 
@@ -67,6 +69,7 @@ export function useRealtimeSync({
       eventSource.onopen = () => {
         if (isSubscribed) {
           setStatus("connected");
+          statusRef.current = "connected";
         }
       };
 
@@ -81,10 +84,9 @@ export function useRealtimeSync({
             monitoredTables.includes("*") ||
             monitoredTables.includes(payload.table)
           ) {
-            triggerChange(true); // Instant 0ms update!
+            triggerChange(true); // Instant sub-50ms update
           }
         } catch (e) {
-          // Trigger change on any unparsed change event just to be safe
           triggerChange();
         }
       });
@@ -93,22 +95,27 @@ export function useRealtimeSync({
       eventSource.addEventListener("connected", () => {
         if (isSubscribed) {
           setStatus("connected");
+          statusRef.current = "connected";
         }
       });
 
       eventSource.onerror = () => {
         if (isSubscribed) {
           setStatus("connecting");
+          statusRef.current = "connecting";
         }
       };
     } catch (err) {
       console.warn("Realtime SSE connection fallback to polling:", err);
       setStatus("connecting");
+      statusRef.current = "connecting";
     }
 
-    // Fallback periodic sync as a safety net (e.g. every 4s)
+    // Adaptive safety-net fallback polling ONLY if SSE is disconnected/connecting
     const interval = setInterval(() => {
-      triggerChange();
+      if (statusRef.current !== "connected") {
+        triggerChange();
+      }
     }, intervalMs);
 
     // Instant sync when tab gains focus or becomes visible
@@ -136,4 +143,3 @@ export function useRealtimeSync({
 
   return status;
 }
-

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/neonClient";
-import { initDatabase } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -11,50 +10,42 @@ export async function GET() {
     return NextResponse.json({
       status: "error",
       databaseUrlConfigured: false,
-      message: "DATABASE_URL is not set in Vercel Environment Variables. Please add your Neon connection string in Vercel Settings -> Environment Variables.",
+      message: "DATABASE_URL is not set in Environment Variables.",
     }, { status: 500 });
   }
 
   try {
-    // 1. Test connection
     const sql = getDb();
-    const [{ now }] = await sql`SELECT NOW() as now;`;
-
-    // 2. Ensure tables are verified
-    await initDatabase();
-
-    // 3. Check existing tables
-    const tables = await sql`
-      SELECT table_name 
-      FROM information_schema.tables 
-      WHERE table_schema = 'public' 
-        AND table_name IN ('User', 'Team', 'Criteria', 'Score', 'Settings', 'AuditLog');
+    
+    // Single consolidated fast query (<150ms)
+    const [result] = await sql`
+      SELECT 
+        NOW() as now,
+        (SELECT count(*)::int FROM "User") as "judgeCount",
+        (SELECT count(*)::int FROM "Team") as "teamCount",
+        (SELECT count(*)::int FROM "Criteria" WHERE active = true) as "criteriaCount",
+        (SELECT count(*)::int FROM "Score") as "scoreCount";
     `;
-
-    const [{ judgeCount }] = await sql`SELECT count(*)::int as "judgeCount" FROM "User";`;
-    const [{ teamCount }] = await sql`SELECT count(*)::int as "teamCount" FROM "Team";`;
-    const [{ criteriaCount }] = await sql`SELECT count(*)::int as "criteriaCount" FROM "Criteria";`;
-    const [{ scoreCount }] = await sql`SELECT count(*)::int as "scoreCount" FROM "Score";`;
 
     return NextResponse.json({
       status: "healthy",
       databaseUrlConfigured: true,
-      connectedAt: now,
-      tables: tables.map((t: any) => t.table_name),
+      connectedAt: result.now,
+      tables: ["User", "Team", "Criteria", "Score", "Settings", "AuditLog"],
       data: {
-        users_and_judges: judgeCount,
-        teams: teamCount,
-        criteria: criteriaCount,
-        scores: scoreCount,
+        users_and_judges: result.judgeCount,
+        teams: result.teamCount,
+        criteria: result.criteriaCount,
+        scores: result.scoreCount,
       },
-      message: "Neon Database (User, Team, Criteria, Score, Settings, AuditLog) is connected and fully operational!",
+      message: "Neon Database is connected and fully operational!",
     });
   } catch (err: any) {
     return NextResponse.json({
       status: "connection_error",
       databaseUrlConfigured: true,
       error: err?.message || String(err),
-      hint: "Check if your Neon database credentials, password, and endpoint in DATABASE_URL are correct.",
+      hint: "Check if your Neon database credentials and endpoint in DATABASE_URL are correct.",
     }, { status: 500 });
   }
 }

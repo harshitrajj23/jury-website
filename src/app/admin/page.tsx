@@ -128,7 +128,7 @@ export default function AdminPage() {
     tables: ["Score", "Team", "User", "Criteria", "Settings"],
     onDataChange: handleRealtimeChange,
     enabled: isAdmin,
-    intervalMs: 3500,
+    intervalMs: 20000,
   });
 
   const handleSaveTimer = async () => {
