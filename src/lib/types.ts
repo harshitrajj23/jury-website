@@ -27,6 +27,7 @@ export interface ScoringCriteria {
   maxScore?: number;
   weight?: number;
   orderIndex?: number;
+  active?: boolean;
 }
 
 export interface JudgeSignOff {
@@ -40,6 +41,7 @@ export interface ScoreRecord {
   judgeId: string;
   scores: Record<string, number>; // Mapping criteria.id -> score
   totalScore: number;
+  weightedScore?: number;
   submittedAt: string;
   judgeSignOff?: JudgeSignOff;
 }
@@ -58,11 +60,13 @@ export interface LeaderboardEntry {
   teamId: string;
   teamName: string;
   projectName?: string;
-  averageScore: number;
+  averageScore: number; // weighted average score
+  rawAverageScore?: number; // unweighted average score
   judgeSubmissions: {
     judgeId: string;
     judgeName: string;
     totalScore: number;
+    weightedScore?: number;
   }[];
 }
 
