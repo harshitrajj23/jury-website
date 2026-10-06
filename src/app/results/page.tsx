@@ -191,7 +191,7 @@ function LeaderboardContent() {
           <div className="w-full bg-cyber-bg-darker/60 border border-cyber-red/15 p-4 font-mono text-[10px] text-gray-400 text-left flex flex-col gap-1">
             <span className="text-cyber-red font-bold uppercase">📟 SEC-STATUS:</span>
             <span>⚡ EVENT: {currentEvent?.name?.toUpperCase() || selectedEventId.toUpperCase()}</span>
-            <span>⚡ FEED: SCORESPHERE-RESULTS-8443</span>
+            <span>⚡ BROADCAST FEED: EVENT-RESULTS-PORTAL</span>
             <span>⚡ REALTIME LINK: {realtimeStatus === "connected" ? "LIVE SSE ACTIVE" : "OFFLINE"}</span>
           </div>
 
@@ -224,28 +224,45 @@ function LeaderboardContent() {
           
           {/* Left: Branding & Event Identity */}
           <div className="flex items-center gap-3 min-w-0">
-            {currentEvent?.logo ? (
-              <div className="p-1 bg-black/40 border border-cyber-magenta/30 flex items-center justify-center shrink-0">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img 
-                  src={currentEvent.logo} 
-                  alt={currentEvent.name} 
-                  className="h-8 max-w-[110px] object-contain"
-                  onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
-                />
-              </div>
-            ) : (
-              <span className="p-2 bg-cyber-magenta/10 text-cyber-magenta border border-cyber-magenta/20 shrink-0">
-                <Trophy className="w-5 h-5 text-cyber-magenta text-glow-magenta animate-pulse" />
-              </span>
-            )}
+            {/* Event Logo & Organizer Logo (or clean generic badge fallback) */}
+            <div className="flex items-center gap-2 shrink-0">
+              {currentEvent?.logo && (
+                <div className="p-1 bg-black/40 border border-cyber-magenta/30 flex items-center justify-center shrink-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img 
+                    src={currentEvent.logo} 
+                    alt={currentEvent.name} 
+                    className="h-8 max-w-[110px] object-contain"
+                    onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                  />
+                </div>
+              )}
+
+              {currentEvent?.organizerLogo && (
+                <div className="p-1 bg-black/40 border border-gray-700 flex items-center justify-center shrink-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img 
+                    src={currentEvent.organizerLogo} 
+                    alt={currentEvent.organizer || "Organizer"} 
+                    className="h-8 max-w-[110px] object-contain"
+                    onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                  />
+                </div>
+              )}
+
+              {!currentEvent?.logo && !currentEvent?.organizerLogo && (
+                <span className="p-2 bg-cyber-magenta/10 text-cyber-magenta border border-cyber-magenta/20 shrink-0">
+                  <Trophy className="w-5 h-5 text-cyber-magenta text-glow-magenta animate-pulse" />
+                </span>
+              )}
+            </div>
 
             <div className="min-w-0">
               <h1 className="font-orbitron font-extrabold text-base sm:text-lg text-white tracking-widest text-glow-magenta uppercase truncate">
-                {currentEvent?.name || "SCORESPHERE CHAMPIONS LIST"}
+                {currentEvent?.name || "CHAMPIONS PODIUM"}
               </h1>
               <span className="font-mono text-[9px] text-cyber-magenta tracking-widest uppercase block mt-0.5 truncate">
-                {realtimeStatus === "connected" ? "🔴 LIVE BROADCAST" : "OFFLINE"} • {currentEvent?.subtitle || currentEvent?.organizer || "FINAL RANKINGS"}
+                {realtimeStatus === "connected" ? "🔴 LIVE BROADCAST" : "OFFLINE"} • {currentEvent?.organizer ? `${currentEvent.organizer} • ` : ""}{currentEvent?.subtitle || "FINAL RANKINGS"}
               </span>
             </div>
           </div>

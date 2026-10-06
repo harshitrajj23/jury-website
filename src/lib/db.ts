@@ -29,7 +29,23 @@ export async function initDatabase(): Promise<ActionResult> {
       WHERE table_schema = 'public' AND table_name = 'Event';
     `;
 
+    // Ensure core schema and required multi-event columns exist
     if (check && check[0]?.count > 0) {
+      await sql`
+        ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "organizerLogo" TEXT NOT NULL DEFAULT '';
+        ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "date" TEXT NOT NULL DEFAULT '';
+        ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "theme" TEXT NOT NULL DEFAULT '';
+        ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "status" TEXT NOT NULL DEFAULT 'active';
+      `;
+      // Clean up legacy organization-specific hardcoded default branding
+      await sql`
+        UPDATE "Event"
+        SET name = 'TechNova Hackathon',
+            subtitle = 'Collegiate Innovation Challenge',
+            organizer = 'Computer Science Club',
+            logo = ''
+        WHERE id = 'default_event' AND (name ILIKE '%PALS%' OR organizer ILIKE '%PALS%');
+      `;
       tablesInitialized = true;
       return { success: true };
     }
@@ -42,6 +58,10 @@ export async function initDatabase(): Promise<ActionResult> {
         subtitle TEXT NOT NULL DEFAULT '',
         organizer TEXT NOT NULL DEFAULT '',
         logo TEXT NOT NULL DEFAULT '',
+        "organizerLogo" TEXT NOT NULL DEFAULT '',
+        date TEXT NOT NULL DEFAULT '',
+        theme TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'active',
         "timerDuration" INTEGER NOT NULL DEFAULT 300,
         "judgingOpen" BOOLEAN NOT NULL DEFAULT true,
         "leaderboardUnlocked" BOOLEAN NOT NULL DEFAULT false,
@@ -131,10 +151,10 @@ export async function initDatabase(): Promise<ActionResult> {
       );
     `;
 
-    // Ensure default event and global settings exist
+    // Ensure default generic event and global settings exist
     await sql`
-      INSERT INTO "Event" (id, name, subtitle, organizer, logo, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active)
-      VALUES ('default_event', 'PALS Hackathon 2026', 'BMSIT Innovation Challenge', 'PALS Consortium', '/pals-logo.svg', 300, true, false, false, true)
+      INSERT INTO "Event" (id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active)
+      VALUES ('default_event', 'TechNova Hackathon', 'Collegiate Innovation Challenge', 'Computer Science Club', '', '', '', '', 'active', 300, true, false, false, true)
       ON CONFLICT (id) DO NOTHING;
     `;
 
@@ -174,7 +194,7 @@ export async function getEvents(): Promise<EventItem[]> {
   try {
     const sql = getDb();
     const rows = await sql`
-      SELECT id, name, subtitle, organizer, logo, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active, "createdAt", "updatedAt"
+      SELECT id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active, "createdAt", "updatedAt"
       FROM "Event"
       WHERE active = true
       ORDER BY "createdAt" ASC;
@@ -186,6 +206,10 @@ export async function getEvents(): Promise<EventItem[]> {
       subtitle: e.subtitle || "",
       organizer: e.organizer || "",
       logo: e.logo || "",
+      organizerLogo: e.organizerLogo || "",
+      date: e.date || "",
+      theme: e.theme || "",
+      status: e.status || "active",
       timerDuration: typeof e.timerDuration === "number" ? e.timerDuration : 300,
       judgingOpen: e.judgingOpen !== false,
       leaderboardUnlocked: Boolean(e.leaderboardUnlocked),
@@ -199,10 +223,14 @@ export async function getEvents(): Promise<EventItem[]> {
     return [
       {
         id: "default_event",
-        name: "PALS Hackathon 2026",
-        subtitle: "BMSIT Innovation Challenge",
-        organizer: "PALS Consortium",
-        logo: "/pals-logo.svg",
+        name: "TechNova Hackathon",
+        subtitle: "Collegiate Innovation Challenge",
+        organizer: "Computer Science Club",
+        logo: "",
+        organizerLogo: "",
+        date: "",
+        theme: "",
+        status: "active",
         timerDuration: 300,
         judgingOpen: true,
         leaderboardUnlocked: false,
@@ -216,7 +244,7 @@ export async function getEvent(eventId: string = "default_event"): Promise<Event
   try {
     const sql = getDb();
     const rows = await sql`
-      SELECT id, name, subtitle, organizer, logo, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active
+      SELECT id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active
       FROM "Event"
       WHERE id = ${eventId}
       LIMIT 1;
@@ -229,6 +257,10 @@ export async function getEvent(eventId: string = "default_event"): Promise<Event
       subtitle: e.subtitle || "",
       organizer: e.organizer || "",
       logo: e.logo || "",
+      organizerLogo: e.organizerLogo || "",
+      date: e.date || "",
+      theme: e.theme || "",
+      status: e.status || "active",
       timerDuration: typeof e.timerDuration === "number" ? e.timerDuration : 300,
       judgingOpen: e.judgingOpen !== false,
       leaderboardUnlocked: Boolean(e.leaderboardUnlocked),
@@ -249,14 +281,18 @@ export async function createEvent(eventData: Partial<EventItem>): Promise<Action
     const subtitle = (eventData.subtitle || "").trim();
     const organizer = (eventData.organizer || "").trim();
     const logo = (eventData.logo || "").trim();
+    const organizerLogo = (eventData.organizerLogo || "").trim();
+    const date = (eventData.date || "").trim();
+    const theme = (eventData.theme || "").trim();
+    const status = (eventData.status || "active").trim();
     const timerDuration = Math.max(60, Math.min(3600, eventData.timerDuration || 300));
 
     await sql`
-      INSERT INTO "Event" (id, name, subtitle, organizer, logo, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active, "createdAt", "updatedAt")
-      VALUES (${id}, ${name}, ${subtitle}, ${organizer}, ${logo}, ${timerDuration}, true, false, false, true, NOW(), NOW())
+      INSERT INTO "Event" (id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active, "createdAt", "updatedAt")
+      VALUES (${id}, ${name}, ${subtitle}, ${organizer}, ${logo}, ${organizerLogo}, ${date}, ${theme}, ${status}, ${timerDuration}, true, false, false, true, NOW(), NOW())
     `;
 
-    // Clone base criteria for this event if none exist
+    // Clone base criteria for this event if template criteria exist
     const baseCriteria = await sql`
       SELECT name, description, "maxScore", weight, "orderIndex" 
       FROM "Criteria" 
@@ -279,6 +315,10 @@ export async function createEvent(eventData: Partial<EventItem>): Promise<Action
       subtitle,
       organizer,
       logo,
+      organizerLogo,
+      date,
+      theme,
+      status,
       timerDuration,
       judgingOpen: true,
       leaderboardUnlocked: false,
@@ -305,6 +345,10 @@ export async function updateEvent(eventId: string, updates: Partial<EventItem>):
     const subtitle = updates.subtitle !== undefined ? updates.subtitle.trim() : existing.subtitle;
     const organizer = updates.organizer !== undefined ? updates.organizer.trim() : existing.organizer;
     const logo = updates.logo !== undefined ? updates.logo.trim() : existing.logo;
+    const organizerLogo = updates.organizerLogo !== undefined ? updates.organizerLogo.trim() : (existing.organizerLogo || "");
+    const date = updates.date !== undefined ? updates.date.trim() : (existing.date || "");
+    const theme = updates.theme !== undefined ? updates.theme.trim() : (existing.theme || "");
+    const status = updates.status !== undefined ? updates.status.trim() : (existing.status || "active");
     const timerDuration = updates.timerDuration !== undefined ? Math.max(60, Math.min(3600, updates.timerDuration)) : existing.timerDuration;
     const judgingOpen = updates.judgingOpen !== undefined ? updates.judgingOpen : existing.judgingOpen;
     const leaderboardUnlocked = updates.leaderboardUnlocked !== undefined ? updates.leaderboardUnlocked : existing.leaderboardUnlocked;
@@ -315,6 +359,10 @@ export async function updateEvent(eventId: string, updates: Partial<EventItem>):
           subtitle = ${subtitle},
           organizer = ${organizer},
           logo = ${logo},
+          "organizerLogo" = ${organizerLogo},
+          date = ${date},
+          theme = ${theme},
+          status = ${status},
           "timerDuration" = ${timerDuration},
           "judgingOpen" = ${judgingOpen},
           "leaderboardUnlocked" = ${leaderboardUnlocked},
@@ -328,6 +376,10 @@ export async function updateEvent(eventId: string, updates: Partial<EventItem>):
       subtitle,
       organizer,
       logo,
+      organizerLogo,
+      date,
+      theme,
+      status,
       timerDuration,
       judgingOpen,
       leaderboardUnlocked,
@@ -392,7 +444,7 @@ export async function addJudge(judge: Omit<Judge, "id">, eventId?: string): Prom
       return { success: false, error: "Email or Username is required." };
     }
 
-    const email = usernameRaw.includes('@') ? usernameRaw.toLowerCase() : `${usernameRaw.toLowerCase()}@pals.hackathon`;
+    const email = usernameRaw.includes('@') ? usernameRaw.toLowerCase() : `${usernameRaw.toLowerCase()}@jury.portal`;
     const targetEventId = judge.eventId || eventId || 'default_event';
 
     // Check if user already exists
@@ -568,12 +620,27 @@ export async function getConfig(eventId: string = "default_event"): Promise<AppC
   try {
     const sql = getDb();
 
-    // Query event-specific settings if present, falling back to global settings
-    const [eventRows, settingsRows, criteriaRows] = await Promise.all([
-      sql`SELECT id, name, subtitle, organizer, logo, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady" FROM "Event" WHERE id = ${eventId} LIMIT 1;`,
+    // Query event-specific settings and criteria strictly scoped to eventId
+    const [eventRows, settingsRows] = await Promise.all([
+      sql`SELECT id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady" FROM "Event" WHERE id = ${eventId} LIMIT 1;`,
       sql`SELECT "leaderboardUnlocked", "judgingOpen", "finaleReady", "timerDuration" FROM "Settings" WHERE id = 'global' LIMIT 1;`,
-      sql`SELECT id, name, description, "maxScore", weight, "orderIndex", active, "eventId" FROM "Criteria" WHERE active = true AND ("eventId" = ${eventId} OR "eventId" = 'default_event') ORDER BY "orderIndex" ASC;`,
     ]);
+
+    // Strictly scope criteria to eventId; only use template if event has no custom criteria
+    let criteriaRows = await sql`
+      SELECT id, name, description, "maxScore", weight, "orderIndex", active, "eventId" 
+      FROM "Criteria" 
+      WHERE active = true AND "eventId" = ${eventId} 
+      ORDER BY "orderIndex" ASC;
+    `;
+    if ((!criteriaRows || criteriaRows.length === 0) && eventId !== "default_event") {
+      criteriaRows = await sql`
+        SELECT id, name, description, "maxScore", weight, "orderIndex", active, "eventId" 
+        FROM "Criteria" 
+        WHERE active = true AND "eventId" = 'default_event' 
+        ORDER BY "orderIndex" ASC;
+      `;
+    }
 
     const ev = eventRows && eventRows.length > 0 ? eventRows[0] : null;
     const settings = settingsRows && settingsRows.length > 0 ? settingsRows[0] : { leaderboardUnlocked: false, judgingOpen: true, finaleReady: false, timerDuration: 300 };
@@ -1129,8 +1196,9 @@ export async function verifyUserLogin(usernameOrEmail: string, passwordAttempt: 
       SELECT id, name, email, "passwordHash", role, completed, "eventId"
       FROM "User" 
       WHERE LOWER(email) = ${input} 
-         OR LOWER(email) = ${input + '@pals.hackathon'}
+         OR LOWER(email) = ${input + '@jury.portal'}
          OR LOWER(name) = ${input}
+         OR LOWER(id) = ${input}
       LIMIT 1;
     `;
 

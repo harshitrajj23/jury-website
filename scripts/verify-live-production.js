@@ -54,9 +54,7 @@ async function verifyLiveProduction() {
     { name: "Judge Dashboard (/dashboard)", url: `${TARGET_URL}/dashboard` },
     { name: "Admin Console (/admin)", url: `${TARGET_URL}/admin` },
     { name: "Results Podium (/results)", url: `${TARGET_URL}/results` },
-    { name: "Event A Results (/results?event=default_event)", url: `${TARGET_URL}/results?event=default_event` },
-    { name: "PALS Logo Asset (/pals-logo.svg)", url: `${TARGET_URL}/pals-logo.svg`, checkSvg: true },
-    { name: "IEEE Logo Asset (/ieee-logo.svg)", url: `${TARGET_URL}/ieee-logo.svg`, checkSvg: true },
+    { name: "Scoped Event Results (/results?event=default_event)", url: `${TARGET_URL}/results?event=default_event` },
     { name: "Database Health API (/api/db-health)", url: `${TARGET_URL}/api/db-health`, checkJson: true },
   ];
 

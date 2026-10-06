@@ -15,8 +15,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "SCORESPHERE - Hackathon Portal",
-  description: "Cyberpunk Hackathon Judge Scoring & Evaluation Portal for SCORESPHERE",
+  title: "Jury Evaluation Platform | Multi-Event Judging & Scoring System",
+  description: "Generic Multi-Event Jury Evaluation and Realtime Scoring Platform for Competitions, Hackathons, and Project Exhibitions",
 };
 
 export default function RootLayout({

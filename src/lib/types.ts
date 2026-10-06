@@ -56,6 +56,10 @@ export interface EventItem {
   subtitle?: string;
   organizer?: string;
   logo?: string;
+  organizerLogo?: string;
+  date?: string;
+  theme?: string;
+  status?: string;
   timerDuration: number; // in seconds
   judgingOpen: boolean;
   leaderboardUnlocked: boolean;

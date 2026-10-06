@@ -82,12 +82,23 @@ export default function AdminConsolePage() {
   const [newTeamName, setNewTeamName] = useState("");
   const [newCriteriaName, setNewCriteriaName] = useState("");
 
-  // Event Creation / Editing state
+  // Event Creation state
   const [newEventName, setNewEventName] = useState("");
   const [newEventSubtitle, setNewEventSubtitle] = useState("");
   const [newEventOrganizer, setNewEventOrganizer] = useState("");
   const [newEventLogo, setNewEventLogo] = useState("");
+  const [newEventOrgLogo, setNewEventOrgLogo] = useState("");
+  const [newEventDate, setNewEventDate] = useState("");
   const [newEventTimer, setNewEventTimer] = useState("5");
+
+  // Selected Event Editing state
+  const [editEventName, setEditEventName] = useState("");
+  const [editEventSubtitle, setEditEventSubtitle] = useState("");
+  const [editEventOrganizer, setEditEventOrganizer] = useState("");
+  const [editEventLogo, setEditEventLogo] = useState("");
+  const [editEventOrgLogo, setEditEventOrgLogo] = useState("");
+  const [editEventDate, setEditEventDate] = useState("");
+  const [editEventStatus, setEditEventStatus] = useState("active");
 
   // Loading indicator states
   const [dbLoading, setDbLoading] = useState(true);
@@ -98,6 +109,19 @@ export default function AdminConsolePage() {
   useEffect(() => {
     selectedEventIdRef.current = selectedEventId;
   }, [selectedEventId]);
+
+  // Synchronize edit fields when currentEvent changes
+  useEffect(() => {
+    if (currentEvent) {
+      setEditEventName(currentEvent.name || "");
+      setEditEventSubtitle(currentEvent.subtitle || "");
+      setEditEventOrganizer(currentEvent.organizer || "");
+      setEditEventLogo(currentEvent.logo || "");
+      setEditEventOrgLogo(currentEvent.organizerLogo || "");
+      setEditEventDate(currentEvent.date || "");
+      setEditEventStatus(currentEvent.status || "active");
+    }
+  }, [currentEvent]);
 
   useEffect(() => {
     initDatabase();
@@ -250,7 +274,10 @@ export default function AdminConsolePage() {
         name: newEventName.trim(),
         subtitle: newEventSubtitle.trim(),
         organizer: newEventOrganizer.trim(),
-        logo: newEventLogo.trim() || "/pals-logo.svg",
+        logo: newEventLogo.trim(),
+        organizerLogo: newEventOrgLogo.trim(),
+        date: newEventDate.trim(),
+        status: "active",
         timerDuration: mins * 60,
       });
 
@@ -263,10 +290,41 @@ export default function AdminConsolePage() {
       setNewEventSubtitle("");
       setNewEventOrganizer("");
       setNewEventLogo("");
+      setNewEventOrgLogo("");
+      setNewEventDate("");
       alert(`✅ EVENT "${res.data.name}" CREATED SUCCESSFULLY.`);
       handleEventSwitch(res.data.id);
     } catch (err: any) {
       alert(`FAIL: EVENT CREATION ERROR: ${err?.message || "Database error"}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleUpdateCurrentEvent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editEventName.trim()) return;
+    setActionLoading(true);
+    try {
+      const res = await updateEvent(selectedEventId, {
+        name: editEventName.trim(),
+        subtitle: editEventSubtitle.trim(),
+        organizer: editEventOrganizer.trim(),
+        logo: editEventLogo.trim(),
+        organizerLogo: editEventOrgLogo.trim(),
+        date: editEventDate.trim(),
+        status: editEventStatus.trim() || "active",
+      });
+
+      if (!res.success || !res.data) {
+        alert(`FAIL: EVENT UPDATE FAILED.\n\n${res.error}`);
+        return;
+      }
+
+      alert(`✅ EVENT "${res.data.name}" SETTINGS SAVED SUCCESSFULLY.`);
+      await fetchDbData(selectedEventId, false);
+    } catch (err: any) {
+      alert(`FAIL: EVENT UPDATE ERROR: ${err?.message || "Database error"}`);
     } finally {
       setActionLoading(false);
     }
@@ -567,21 +625,38 @@ export default function AdminConsolePage() {
           
           {/* Left: Branding & Event Dropdown */}
           <div className="flex items-center gap-3 min-w-0">
-            {currentEvent?.logo ? (
-              <div className="p-1 bg-black/40 border border-cyber-magenta/30 flex items-center justify-center shrink-0">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img 
-                  src={currentEvent.logo} 
-                  alt={currentEvent.name} 
-                  className="h-8 max-w-[110px] object-contain"
-                  onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
-                />
-              </div>
-            ) : (
-              <span className="p-2 bg-cyber-magenta/10 text-cyber-magenta border border-cyber-magenta/30 shrink-0">
-                <Settings className="w-5 h-5 animate-spin" />
-              </span>
-            )}
+            {/* Event Logo & Organizer Logo (or clean generic badge fallback) */}
+            <div className="flex items-center gap-2 shrink-0">
+              {currentEvent?.logo && (
+                <div className="p-1 bg-black/40 border border-cyber-magenta/30 flex items-center justify-center shrink-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img 
+                    src={currentEvent.logo} 
+                    alt={currentEvent.name} 
+                    className="h-8 max-w-[110px] object-contain"
+                    onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                  />
+                </div>
+              )}
+
+              {currentEvent?.organizerLogo && (
+                <div className="p-1 bg-black/40 border border-gray-700 flex items-center justify-center shrink-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img 
+                    src={currentEvent.organizerLogo} 
+                    alt={currentEvent.organizer || "Organizer"} 
+                    className="h-8 max-w-[110px] object-contain"
+                    onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                  />
+                </div>
+              )}
+
+              {!currentEvent?.logo && !currentEvent?.organizerLogo && (
+                <span className="p-2 bg-cyber-magenta/10 text-cyber-magenta border border-cyber-magenta/30 shrink-0">
+                  <Settings className="w-5 h-5 animate-spin" />
+                </span>
+              )}
+            </div>
 
             <div className="min-w-0">
               <h1 className="font-orbitron font-extrabold text-base sm:text-lg text-white tracking-widest text-glow-magenta uppercase truncate">
@@ -707,19 +782,95 @@ export default function AdminConsolePage() {
         {/* ============================================================== */}
         {/* TAB 2: EVENTS MANAGEMENT (REQUIREMENT 6 & 8)                   */}
         {/* ============================================================== */}
+        {/* ============================================================== */}
+        {/* TAB 2: EVENTS & BRANDING CONFIGURATION                         */}
+        {/* ============================================================== */}
         {activeTab === "events" && (
           <div className="flex flex-col gap-6">
+            {/* Edit Current Selected Event Settings */}
+            <div className="cyber-glass border border-cyber-magenta/30 p-6 flex flex-col gap-4">
+              <div className="flex items-center justify-between border-b border-cyber-magenta/20 pb-3 flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <Edit3 className="w-4 h-4 text-cyber-magenta" />
+                  <h2 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase">
+                    ⚙️ EVENT SETTINGS & IDENTITY: {currentEvent?.name?.toUpperCase() || selectedEventId.toUpperCase()}
+                  </h2>
+                </div>
+                <span className="font-mono text-[10px] text-gray-400">
+                  ID: {selectedEventId}
+                </span>
+              </div>
+
+              <form onSubmit={handleUpdateCurrentEvent} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <CyberInput
+                  variant="magenta"
+                  label="EVENT NAME"
+                  placeholder="e.g. TechNova Hackathon"
+                  value={editEventName}
+                  onChange={(e) => setEditEventName(e.target.value)}
+                  disabled={actionLoading}
+                  required
+                />
+                <CyberInput
+                  variant="magenta"
+                  label="ORGANIZER / CLUB NAME"
+                  placeholder="e.g. Computer Science Club"
+                  value={editEventOrganizer}
+                  onChange={(e) => setEditEventOrganizer(e.target.value)}
+                  disabled={actionLoading}
+                />
+                <CyberInput
+                  variant="magenta"
+                  label="SUBTITLE / DESCRIPTION"
+                  placeholder="e.g. Annual Collegiate Innovation Challenge"
+                  value={editEventSubtitle}
+                  onChange={(e) => setEditEventSubtitle(e.target.value)}
+                  disabled={actionLoading}
+                />
+                <CyberInput
+                  variant="magenta"
+                  label="EVENT LOGO (URL OR PATH)"
+                  placeholder="e.g. /logos/event-logo.svg or https://..."
+                  value={editEventLogo}
+                  onChange={(e) => setEditEventLogo(e.target.value)}
+                  disabled={actionLoading}
+                />
+                <CyberInput
+                  variant="magenta"
+                  label="ORGANIZER LOGO (URL OR PATH)"
+                  placeholder="e.g. /logos/club-logo.svg or https://..."
+                  value={editEventOrgLogo}
+                  onChange={(e) => setEditEventOrgLogo(e.target.value)}
+                  disabled={actionLoading}
+                />
+                <CyberInput
+                  variant="magenta"
+                  label="EVENT DATE / SCHEDULE"
+                  placeholder="e.g. 2026-10-15 or Oct 15-16, 2026"
+                  value={editEventDate}
+                  onChange={(e) => setEditEventDate(e.target.value)}
+                  disabled={actionLoading}
+                />
+
+                <div className="sm:col-span-2 lg:col-span-3 flex justify-end mt-2">
+                  <CyberButton type="submit" variant="magenta" disabled={actionLoading} className="flex items-center gap-2">
+                    <Save className="w-4 h-4" /> {actionLoading ? "SAVING..." : "SAVE SELECTED EVENT SETTINGS"}
+                  </CyberButton>
+                </div>
+              </form>
+            </div>
+
             {/* Create New Event Form */}
             <div className="cyber-glass border border-cyber-magenta/20 p-6 flex flex-col gap-4">
               <h2 className="font-orbitron text-sm font-bold text-cyber-magenta tracking-wide uppercase border-b border-cyber-magenta/15 pb-2">
-                ➕ CREATE NEW HACKATHON / EVALUATION EVENT
+                ➕ CREATE NEW EVALUATION EVENT / COMPETITION
               </h2>
 
               <form onSubmit={handleCreateEvent} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <CyberInput
                   variant="magenta"
                   label="EVENT NAME"
-                  placeholder="e.g. IEEE Innovation Challenge"
+                  placeholder="e.g. InnovateX 2026"
                   value={newEventName}
                   onChange={(e) => setNewEventName(e.target.value)}
                   disabled={actionLoading}
@@ -727,26 +878,42 @@ export default function AdminConsolePage() {
                 />
                 <CyberInput
                   variant="magenta"
-                  label="SUBTITLE / THEME"
-                  placeholder="e.g. Student Branch Flagship 2026"
-                  value={newEventSubtitle}
-                  onChange={(e) => setNewEventSubtitle(e.target.value)}
-                  disabled={actionLoading}
-                />
-                <CyberInput
-                  variant="magenta"
-                  label="ORGANIZER NAME"
-                  placeholder="e.g. IEEE CIS / BMSIT"
+                  label="ORGANIZER / CLUB NAME"
+                  placeholder="e.g. Electronics Society"
                   value={newEventOrganizer}
                   onChange={(e) => setNewEventOrganizer(e.target.value)}
                   disabled={actionLoading}
                 />
                 <CyberInput
                   variant="magenta"
-                  label="LOGO SVG/IMAGE PATH"
-                  placeholder="e.g. /ieee-logo.svg or /pals-logo.svg"
+                  label="SUBTITLE / DESCRIPTION"
+                  placeholder="e.g. Hardware & AI Exhibition"
+                  value={newEventSubtitle}
+                  onChange={(e) => setNewEventSubtitle(e.target.value)}
+                  disabled={actionLoading}
+                />
+                <CyberInput
+                  variant="magenta"
+                  label="EVENT LOGO (URL / PATH)"
+                  placeholder="e.g. /logos/event-logo.svg"
                   value={newEventLogo}
                   onChange={(e) => setNewEventLogo(e.target.value)}
+                  disabled={actionLoading}
+                />
+                <CyberInput
+                  variant="magenta"
+                  label="ORGANIZER LOGO (URL / PATH)"
+                  placeholder="e.g. /logos/organizer-logo.svg"
+                  value={newEventOrgLogo}
+                  onChange={(e) => setNewEventOrgLogo(e.target.value)}
+                  disabled={actionLoading}
+                />
+                <CyberInput
+                  variant="magenta"
+                  label="EVENT DATE"
+                  placeholder="e.g. 2026-11-20"
+                  value={newEventDate}
+                  onChange={(e) => setNewEventDate(e.target.value)}
                   disabled={actionLoading}
                 />
                 <CyberInput
@@ -788,18 +955,32 @@ export default function AdminConsolePage() {
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            {ev.logo && (
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {ev.logo ? (
                               /* eslint-disable-next-line @next/next/no-img-element */
                               <img src={ev.logo} alt="" className="h-5 max-w-[80px] object-contain" />
-                            )}
+                            ) : null}
+                            {ev.organizerLogo ? (
+                              /* eslint-disable-next-line @next/next/no-img-element */
+                              <img src={ev.organizerLogo} alt="" className="h-5 max-w-[80px] object-contain" />
+                            ) : null}
                             <h3 className="font-orbitron font-bold text-white text-sm uppercase truncate">
                               {ev.name}
                             </h3>
                           </div>
                           {ev.subtitle && <p className="text-xs text-gray-400 font-mono mt-0.5">{ev.subtitle}</p>}
                           {ev.organizer && <p className="text-[10px] text-cyber-cyan font-mono mt-0.5">By {ev.organizer}</p>}
-                          <p className="text-[10px] text-gray-500 font-mono mt-1">ID: {ev.id} • Timer: {Math.round(ev.timerDuration / 60)}m</p>
+                          <div className="flex items-center gap-2 mt-1 text-[10px] text-gray-500 font-mono flex-wrap">
+                            <span>ID: {ev.id}</span>
+                            <span>•</span>
+                            <span>Timer: {Math.round(ev.timerDuration / 60)}m</span>
+                            {ev.date && (
+                              <>
+                                <span>•</span>
+                                <span className="text-gray-400">{ev.date}</span>
+                              </>
+                            )}
+                          </div>
                         </div>
 
                         {isCurrent && (

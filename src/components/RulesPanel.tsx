@@ -37,7 +37,7 @@ export default function RulesPanel() {
             JUDGING COMPLIANCE MODULE
           </h3>
           <p className="text-[10px] text-gray-500 font-mono tracking-widest uppercase">
-            PROTOCOL SEC-ID: 77-SCORESPHERE
+            PROTOCOL SEC-ID: JURY-EVAL-CORE
           </p>
         </div>
       </div>

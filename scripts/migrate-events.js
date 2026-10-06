@@ -7,7 +7,7 @@ const sql = neon(connectionString);
 async function migrateEvents() {
   console.log("⚡ Starting Multi-Event Database Schema Migration...");
 
-  // 1. Create Event table
+  // 1. Create or update Event table columns
   await sql`
     CREATE TABLE IF NOT EXISTS "Event" (
       id TEXT PRIMARY KEY,
@@ -15,6 +15,10 @@ async function migrateEvents() {
       subtitle TEXT NOT NULL DEFAULT '',
       organizer TEXT NOT NULL DEFAULT '',
       logo TEXT NOT NULL DEFAULT '',
+      "organizerLogo" TEXT NOT NULL DEFAULT '',
+      date TEXT NOT NULL DEFAULT '',
+      theme TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'active',
       "timerDuration" INTEGER NOT NULL DEFAULT 300,
       "judgingOpen" BOOLEAN NOT NULL DEFAULT true,
       "leaderboardUnlocked" BOOLEAN NOT NULL DEFAULT false,
@@ -24,7 +28,11 @@ async function migrateEvents() {
       "updatedAt" TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `;
-  console.log("✅ Table 'Event' verified/created.");
+  await sql`ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "organizerLogo" TEXT NOT NULL DEFAULT '';`;
+  await sql`ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "date" TEXT NOT NULL DEFAULT '';`;
+  await sql`ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "theme" TEXT NOT NULL DEFAULT '';`;
+  await sql`ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "status" TEXT NOT NULL DEFAULT 'active';`;
+  console.log("✅ Table 'Event' columns verified/created.");
 
   // 2. Add eventId column to Team, Criteria, Score, User
   await sql`ALTER TABLE "Team" ADD COLUMN IF NOT EXISTS "eventId" TEXT NOT NULL DEFAULT 'default_event';`;
@@ -33,17 +41,21 @@ async function migrateEvents() {
   await sql`ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "eventId" TEXT NOT NULL DEFAULT 'default_event';`;
   console.log("✅ 'eventId' column added to Team, Criteria, Score, User.");
 
-  // 3. Insert or update default event
+  // 3. Insert or update default generic event
   await sql`
-    INSERT INTO "Event" (id, name, subtitle, organizer, logo, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active, "createdAt", "updatedAt")
-    VALUES ('default_event', 'PALS Hackathon 2026', 'BMSIT Innovation Challenge', 'PALS Consortium', '/pals-logo.svg', 300, true, false, false, true, NOW(), NOW())
+    INSERT INTO "Event" (id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active, "createdAt", "updatedAt")
+    VALUES ('default_event', 'TechNova Hackathon', 'Collegiate Innovation Challenge', 'Computer Science Club', '', '', '2026-10-15', 'AI & Distributed Systems', 'active', 300, true, false, false, true, NOW(), NOW())
     ON CONFLICT (id) DO UPDATE SET
       name = EXCLUDED.name,
       subtitle = EXCLUDED.subtitle,
       organizer = EXCLUDED.organizer,
-      logo = EXCLUDED.logo;
+      logo = EXCLUDED.logo,
+      "organizerLogo" = EXCLUDED."organizerLogo",
+      date = EXCLUDED.date,
+      theme = EXCLUDED.theme,
+      status = EXCLUDED.status;
   `;
-  console.log("✅ Default event 'default_event' (PALS Hackathon 2026) ensured.");
+  console.log("✅ Default generic event 'default_event' (TechNova Hackathon) ensured.");
 
   // 4. Update existing rows where eventId is null
   await sql`UPDATE "Team" SET "eventId" = 'default_event' WHERE "eventId" IS NULL;`;

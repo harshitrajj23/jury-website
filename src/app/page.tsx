@@ -117,7 +117,7 @@ export default function JudgeAuthPage() {
           <div className="absolute top-0 right-0 w-2 h-2 bg-cyber-cyan animate-ping" />
           <div className="flex items-center gap-2 border-b border-cyber-cyan/20 pb-3 mb-4">
             <Cpu className="w-5 h-5 animate-spin" />
-            <span className="font-orbitron font-bold tracking-widest text-sm">SCORESPHERE_INITIALIZE</span>
+            <span className="font-orbitron font-bold tracking-widest text-sm">JURY_PLATFORM_INITIALIZE</span>
           </div>
           <p className="text-xs">⚡ SECURE CONNECTION PROTOCOL LOADED...</p>
           <p className="text-xs">⚡ SYNCING MULTI-EVENT STORAGE NODES...</p>
@@ -146,27 +146,83 @@ export default function JudgeAuthPage() {
         <span className="absolute top-0 right-0 w-2 h-2 bg-cyber-cyan/30" />
         <span className="absolute bottom-0 left-0 w-2 h-2 bg-cyber-cyan/30" />
 
-        {/* Portal Header with Branding */}
-        <div className="flex flex-col gap-1 text-center border-b border-cyber-cyan/15 pb-4">
-          <div className="flex justify-center items-center gap-2 mb-1.5">
+        {/* Generic Event Selector */}
+        {events.length > 0 && (
+          <div className="flex flex-col gap-1 w-full bg-cyber-bg-darker/90 border border-cyber-cyan/30 p-2.5">
+            <div className="flex items-center justify-between">
+              <label htmlFor="portal-event-select" className="font-orbitron text-[10px] text-cyber-cyan font-bold tracking-widest uppercase flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-cyber-cyan" /> SELECT EVENT:
+              </label>
+              {activeEvent?.date && (
+                <span className="font-mono text-[9px] text-gray-400">{activeEvent.date}</span>
+              )}
+            </div>
+            <select
+              id="portal-event-select"
+              aria-label="Select Evaluation Event"
+              value={selectedEventId}
+              onChange={(e) => setSelectedEventId(e.target.value)}
+              className="bg-gray-900 border border-gray-700 text-white font-mono text-xs px-2.5 py-1.5 outline-none cursor-pointer w-full mt-1 font-semibold"
+            >
+              {events.map((ev) => (
+                <option key={ev.id} value={ev.id} className="bg-gray-900 text-white">
+                  {ev.name} {ev.organizer ? `[${ev.organizer}]` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Dynamic Portal Header with Event & Organizer Branding */}
+        <div className="flex flex-col gap-2 text-center border-b border-cyber-cyan/15 pb-4">
+          <div className="flex justify-center items-center gap-2">
             <Radio className="w-4 h-4 text-cyber-cyan animate-pulse" />
-            <span className="font-mono text-xs text-cyber-cyan/80 tracking-widest font-bold uppercase">
-              {activeEvent?.name || "SCORESPHERE HACKATHON"}
+            <span className="font-mono text-xs text-cyber-cyan/90 tracking-widest font-bold uppercase truncate max-w-full">
+              {activeEvent?.name || "EVALUATION PORTAL"}
             </span>
           </div>
 
-          {activeEvent?.logo && (
-            <div className="flex justify-center my-1">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={activeEvent.logo} alt="" className="h-8 max-w-[130px] object-contain" />
-            </div>
-          )}
+          {/* Event Logo & Organizer Logo (or clean generic badge fallback) */}
+          <div className="flex justify-center items-center gap-3 my-1">
+            {activeEvent?.logo ? (
+              <div className="p-1.5 bg-black/40 border border-cyber-cyan/30 flex items-center justify-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={activeEvent.logo}
+                  alt={activeEvent.name}
+                  className="h-9 max-w-[120px] object-contain"
+                  onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                />
+              </div>
+            ) : null}
+
+            {activeEvent?.organizerLogo ? (
+              <div className="p-1.5 bg-black/40 border border-gray-700 flex items-center justify-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={activeEvent.organizerLogo}
+                  alt={activeEvent.organizer || "Organizer"}
+                  className="h-9 max-w-[120px] object-contain"
+                  onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                />
+              </div>
+            ) : null}
+
+            {!activeEvent?.logo && !activeEvent?.organizerLogo && (
+              <div className="p-2.5 bg-cyber-cyan/10 border border-cyber-cyan/30 text-cyber-cyan shadow-[0_0_12px_rgba(0,240,255,0.2)]">
+                <BadgeCheck className="w-6 h-6 animate-pulse" />
+              </div>
+            )}
+          </div>
 
           <h1 className="font-orbitron font-extrabold text-xl sm:text-2xl text-white tracking-widest text-glow-cyan">
             JURY PORTAL
           </h1>
-          <p className="font-sans text-[10px] text-gray-500 tracking-wider uppercase mt-1">
-            {activeEvent?.subtitle || activeEvent?.organizer || "BMS Institute of Technology & Management, Bengaluru"}
+
+          <p className="font-sans text-[11px] text-gray-400 tracking-wider uppercase">
+            {activeEvent?.organizer ? `${activeEvent.organizer}` : ""}
+            {activeEvent?.organizer && activeEvent?.subtitle ? " • " : ""}
+            {activeEvent?.subtitle || (!activeEvent?.organizer ? "Multi-Event Evaluation Platform" : "")}
           </p>
         </div>
 
@@ -198,31 +254,6 @@ export default function JudgeAuthPage() {
 
         {/* Auth Form */}
         <form onSubmit={handleAuth} className="flex flex-col gap-4">
-
-          {/* Event Picker on Register */}
-          {!isLogin && events.length > 1 && (
-            <div className="flex flex-col gap-1 w-full">
-              <label htmlFor="auth-event-select" className="font-orbitron text-xs font-semibold tracking-widest uppercase text-cyber-cyan text-glow-cyan">
-                ASSIGN EVALUATION EVENT
-              </label>
-              <div className="flex items-center gap-2 bg-cyber-bg-darker/80 border border-gray-800 px-3 py-2 text-xs font-mono">
-                <Layers className="w-4 h-4 text-cyber-cyan shrink-0" />
-                <select
-                  id="auth-event-select"
-                  aria-label="Assign Evaluation Event"
-                  value={selectedEventId}
-                  onChange={(e) => setSelectedEventId(e.target.value)}
-                  className="bg-transparent text-white outline-none w-full cursor-pointer"
-                >
-                  {events.map((ev) => (
-                    <option key={ev.id} value={ev.id} className="bg-gray-900 text-white">
-                      {ev.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          )}
 
           {/* Register-only fields */}
           {!isLogin && (

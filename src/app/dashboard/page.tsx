@@ -400,42 +400,57 @@ export default function JudgeDashboardPage() {
           
           {/* Left: Branding & Event Identity */}
           <div className="flex items-center gap-3 min-w-0">
-            {currentEvent?.logo ? (
-              <div className="p-1.5 bg-black/40 border border-cyber-cyan/20 flex items-center justify-center shrink-0">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img 
-                  src={currentEvent.logo} 
-                  alt={currentEvent.name} 
-                  className="h-8 max-w-[120px] object-contain"
-                  onError={(e) => {
-                    // Fallback to icon if image fails
-                    (e.target as HTMLElement).style.display = 'none';
-                  }}
-                />
-              </div>
-            ) : (
-              <span className="p-2 bg-cyber-cyan/10 text-cyber-cyan border border-cyber-cyan/20 shrink-0">
-                <Sparkles className="w-5 h-5 animate-pulse" />
-              </span>
-            )}
+            {/* Event Logo & Organizer Logo (or clean generic badge fallback) */}
+            <div className="flex items-center gap-2 shrink-0">
+              {currentEvent?.logo && (
+                <div className="p-1.5 bg-black/40 border border-cyber-cyan/30 flex items-center justify-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img 
+                    src={currentEvent.logo} 
+                    alt={currentEvent.name} 
+                    className="h-8 max-w-[110px] object-contain"
+                    onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                  />
+                </div>
+              )}
+
+              {currentEvent?.organizerLogo && (
+                <div className="p-1.5 bg-black/40 border border-gray-700 flex items-center justify-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img 
+                    src={currentEvent.organizerLogo} 
+                    alt={currentEvent.organizer || "Organizer"} 
+                    className="h-8 max-w-[110px] object-contain"
+                    onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                  />
+                </div>
+              )}
+
+              {!currentEvent?.logo && !currentEvent?.organizerLogo && (
+                <span className="p-2 bg-cyber-cyan/10 text-cyber-cyan border border-cyber-cyan/20 shrink-0">
+                  <Sparkles className="w-5 h-5 animate-pulse" />
+                </span>
+              )}
+            </div>
             
             <div className="min-w-0">
               <h1 className="font-orbitron font-extrabold text-base sm:text-lg text-white tracking-widest text-glow-cyan uppercase truncate">
-                {currentEvent?.name || "SCORESPHERE JUDGING DECK"}
+                {currentEvent?.name || "EVALUATION DECK"}
               </h1>
               <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${realtimeStatus === "connected" ? "bg-cyber-green animate-ping" : "bg-cyber-yellow"}`} />
                 <span className="font-mono text-[9px] text-cyber-cyan tracking-wider truncate">
                   {realtimeStatus === "connected" ? "⚡ LIVE SYNC" : "OFFLINE / POLLING"} • JUDGE: {judge.name.toUpperCase()} • [{completedCount}/{teams.length} EVALUATED]
+                  {currentEvent?.organizer ? ` • ${currentEvent.organizer}` : ""}
                 </span>
               </div>
             </div>
           </div>
 
-          {/* Right: Event Switcher & Logout */}
+          {/* Right: Event Info / Switcher & Logout */}
           <div className="flex items-center gap-2.5 flex-wrap justify-between md:justify-end">
-            {/* Event Selector Dropdown */}
-            {events.length > 1 && (
+            {/* Event Selector Dropdown (Only for admins; judges are locked to assigned event) */}
+            {judge.role === "admin" && events.length > 1 && (
               <div className="flex items-center gap-1.5 bg-cyber-bg-darker border border-cyber-cyan/25 px-2.5 py-1 text-xs font-mono">
                 <Layers className="w-3.5 h-3.5 text-cyber-cyan shrink-0" />
                 <label htmlFor="dashboard-event-select" className="sr-only">Select Event</label>
