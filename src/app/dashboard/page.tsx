@@ -13,8 +13,10 @@ import {
   AlertOctagon,
   RefreshCw,
   Layers,
-  ChevronDown,
-  Calendar
+  Search,
+  ArrowLeft,
+  X,
+  Award
 } from "lucide-react";
 import { 
   getTeams, 
@@ -46,7 +48,11 @@ export default function JudgeDashboardPage() {
   const [announceResults, setAnnounceResults] = useState(false);
   const [judgingOpen, setJudgingOpen] = useState(true);
   
-  // Interactive UI State
+  // Team Search & Filter State
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "evaluated">("all");
+
+  // Focused Team Evaluation State
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [evaluationScores, setEvaluationScores] = useState<Record<string, number>>({});
   const [scoreInputs, setScoreInputs] = useState<Record<string, string>>({});
@@ -99,14 +105,15 @@ export default function JudgeDashboardPage() {
       setAnnounceResults(Boolean(config?.announceResults));
       setJudgingOpen(config?.judgingOpen !== false);
       
-      // Auto-select team on initial load or if current team belongs to different event
-      if (allTeams && allTeams.length > 0) {
-        const stillValid = selectedTeamRef.current && allTeams.some((t) => t.id === selectedTeamRef.current?.id);
-        if (!stillValid) {
-          handleSelectTeam(allTeams[0], judgeScores || [], config?.criteriaList || [], judgeId);
+      // If a team is actively open and still exists in this event, keep it synced;
+      // otherwise maintain selectedTeam as null so judge remains on search screen
+      if (selectedTeamRef.current) {
+        const stillValid = allTeams.find((t) => t.id === selectedTeamRef.current?.id);
+        if (stillValid) {
+          setSelectedTeam(stillValid);
+        } else {
+          setSelectedTeam(null);
         }
-      } else {
-        setSelectedTeam(null);
       }
       isInitialLoadRef.current = false;
     } catch (err) {
@@ -355,6 +362,12 @@ export default function JudgeDashboardPage() {
         return [...filtered, record];
       });
 
+      // Close evaluation view and return immediately to the Team Search screen!
+      setSelectedTeam(null);
+      setInputErrors({});
+      setScoreInputs({});
+      setEvaluationScores({});
+
       showFeedback("success", `✅ EVALUATION ENCRYPTED & SUBMITTED FOR ${teamToSubmit.name.toUpperCase()}`);
       
       // Background refetch to ensure complete DB synchronization
@@ -374,7 +387,24 @@ export default function JudgeDashboardPage() {
     return scores.some((s) => s.teamId === teamId && s.judgeId === judge?.id);
   };
 
-  const completedCount = teams.filter((t) => isTeamCompleted(t.id)).length;
+  // Filter teams strictly to the active event
+  const eventTeams = teams.filter((t) => !t.eventId || t.eventId === selectedEventId);
+  const completedCount = eventTeams.filter((t) => isTeamCompleted(t.id)).length;
+  const pendingCount = eventTeams.length - completedCount;
+
+  // Search filter
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const searchResults = eventTeams.filter((t) => {
+    const isCompleted = isTeamCompleted(t.id);
+    if (statusFilter === "pending" && isCompleted) return false;
+    if (statusFilter === "evaluated" && !isCompleted) return false;
+
+    if (!normalizedQuery) return true;
+    const nameMatch = t.name.toLowerCase().includes(normalizedQuery);
+    const projMatch = t.projectName ? t.projectName.toLowerCase().includes(normalizedQuery) : false;
+    const codeMatch = t.teamCode ? t.teamCode.toLowerCase().includes(normalizedQuery) : false;
+    return nameMatch || projMatch || codeMatch;
+  });
 
   if (loading || !judge) {
     return (
@@ -388,14 +418,14 @@ export default function JudgeDashboardPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col relative pb-10 overflow-x-hidden">
+    <div className="min-h-screen flex flex-col relative pb-12 overflow-x-hidden">
       {/* Dynamic Header */}
       <header className="border-b border-cyber-cyan/15 bg-cyber-bg-darker/95 backdrop-blur-md sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           
           {/* Left: Branding & Event Identity */}
           <div className="flex items-center gap-3 min-w-0">
-            {/* Event Logo & Organizer Logo (or clean generic badge fallback) */}
+            {/* Event Logo & Organizer Logo */}
             <div className="flex items-center gap-2 shrink-0">
               {currentEvent?.logo && (
                 <div className="p-1.5 bg-black/40 border border-cyber-cyan/30 flex items-center justify-center">
@@ -435,7 +465,7 @@ export default function JudgeDashboardPage() {
               <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${realtimeStatus === "connected" ? "bg-cyber-green animate-ping" : "bg-cyber-yellow"}`} />
                 <span className="font-mono text-[9px] text-cyber-cyan tracking-wider truncate">
-                  {realtimeStatus === "connected" ? "⚡ LIVE SYNC" : "OFFLINE / POLLING"} • JUDGE: {judge.name.toUpperCase()} • [{completedCount}/{teams.length} EVALUATED]
+                  {realtimeStatus === "connected" ? "⚡ LIVE SYNC" : "OFFLINE / POLLING"} • JUDGE: {judge.name.toUpperCase()} • [{completedCount}/{eventTeams.length} EVALUATED]
                   {currentEvent?.organizer ? ` • ${currentEvent.organizer}` : ""}
                 </span>
               </div>
@@ -444,7 +474,7 @@ export default function JudgeDashboardPage() {
 
           {/* Right: Event Info / Switcher & Logout */}
           <div className="flex items-center gap-2.5 flex-wrap justify-between md:justify-end">
-            {/* Event Selector Dropdown (Only for admins; judges are locked to assigned event) */}
+            {/* Event Selector Dropdown (Only for admins) */}
             {judge.role === "admin" && events.length > 1 && (
               <div className="flex items-center gap-1.5 bg-cyber-bg-darker border border-cyber-cyan/25 px-2.5 py-1 text-xs font-mono">
                 <Layers className="w-3.5 h-3.5 text-cyber-cyan shrink-0" />
@@ -481,7 +511,7 @@ export default function JudgeDashboardPage() {
 
       {/* Floating Feedback Banner */}
       {feedback && (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 mt-4 w-full">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 mt-4 w-full">
           <div className={`p-3.5 font-mono text-xs flex items-center gap-3 border shadow-lg transition-all duration-300 ${
             feedback.type === "success"
               ? "bg-cyber-green/15 border-cyber-green/40 text-cyber-green"
@@ -495,7 +525,7 @@ export default function JudgeDashboardPage() {
 
       {/* Judging Paused Notice */}
       {!judgingOpen && (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 mt-4 w-full">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 mt-4 w-full">
           <div className="p-3 bg-cyber-yellow/15 border border-cyber-yellow/40 text-cyber-yellow font-mono text-xs flex items-center gap-3">
             <AlertOctagon className="w-4 h-4 shrink-0 animate-pulse" />
             <span>⚡ NOTICE: Judging evaluation is currently paused for this event. Submissions are temporarily frozen.</span>
@@ -503,96 +533,265 @@ export default function JudgeDashboardPage() {
         </div>
       )}
 
-      {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 mt-6 flex-grow grid grid-cols-1 lg:grid-cols-12 gap-6 w-full">
+      {/* Main Content Area */}
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 mt-6 flex-grow flex flex-col gap-6 w-full">
         
-        {/* Left Side: Sidebar team selectors (Col 1-3 on desktop, full width on mobile) */}
-        <section className="lg:col-span-3 flex flex-col gap-6">
-          <div className="cyber-glass border border-cyber-cyan/15 p-4 flex flex-col gap-3">
-            <div className="flex justify-between items-center border-b border-cyber-cyan/15 pb-2">
-              <h2 className="font-orbitron text-xs font-bold text-cyber-cyan tracking-wider uppercase">
-                📂 TEAMS ({teams.length})
-              </h2>
-              <span className="font-mono text-[9px] text-gray-400">
-                {completedCount}/{teams.length} DONE
-              </span>
+        {/* ============================================================== */}
+        {/* VIEW A: SEARCH & SELECT TEAM WORKFLOW (DEFAULT SCREEN)         */}
+        {/* ============================================================== */}
+        {!selectedTeam ? (
+          <div className="flex flex-col gap-6 w-full">
+            {/* Search Header Card */}
+            <div className="cyber-glass border border-cyber-cyan/30 p-5 sm:p-6 flex flex-col gap-4 shadow-[0_0_20px_rgba(6,182,212,0.06)]">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-cyber-cyan/15 pb-3">
+                <div className="flex items-center gap-2">
+                  <Search className="w-5 h-5 text-cyber-cyan" />
+                  <h2 className="font-orbitron text-sm sm:text-base font-bold text-white tracking-wider uppercase">
+                    SEARCH TEAM FOR EVALUATION
+                  </h2>
+                </div>
+                <div className="flex items-center gap-2 font-mono text-xs">
+                  <span className="text-gray-400 uppercase">STATUS:</span>
+                  <span className="text-cyber-green font-bold">{completedCount} EVALUATED</span>
+                  <span className="text-gray-600">•</span>
+                  <span className="text-cyber-yellow">{pendingCount} PENDING</span>
+                </div>
+              </div>
+
+              {/* Search Bar Input */}
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                  <Search className="w-4 h-4 text-cyber-cyan/60" />
+                </div>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="🔍 Search team name (e.g. Team Alpha), project, or code..."
+                  className="w-full bg-cyber-bg-darker/90 text-white placeholder-gray-500 font-mono text-sm sm:text-base pl-10 pr-10 py-3 border border-cyber-cyan/40 focus:border-cyber-cyan focus:shadow-[0_0_15px_rgba(6,182,212,0.3)] outline-none transition-all"
+                  autoFocus
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery("")}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-white font-mono text-xs cursor-pointer"
+                    aria-label="Clear search query"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* Status Filter Tabs */}
+              <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                <span className="text-[10px] font-mono text-gray-500 uppercase tracking-wider">VIEW:</span>
+                {[
+                  { id: "all", label: `ALL TEAMS (${eventTeams.length})` },
+                  { id: "pending", label: `PENDING (${pendingCount})` },
+                  { id: "evaluated", label: `EVALUATED (${completedCount})` },
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setStatusFilter(f.id as any)}
+                    className={`px-3 py-1 text-xs font-mono border transition-all cursor-pointer ${
+                      statusFilter === f.id
+                        ? "border-cyber-cyan bg-cyber-cyan/20 text-white font-bold shadow-[0_0_8px_rgba(6,182,212,0.25)]"
+                        : "border-gray-800 bg-cyber-bg-darker/60 hover:border-gray-700 text-gray-400"
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
             </div>
-            
-            {/* Scrollable teams list */}
-            <div className="flex flex-col gap-2 max-h-[380px] lg:max-h-[460px] overflow-y-auto pr-1">
-              {teams.length === 0 ? (
-                <p className="text-xs text-gray-500 font-mono italic p-2">No teams registered for this event yet.</p>
-              ) : (
-                teams.map((t) => {
-                  const completed = isTeamCompleted(t.id);
-                  const selected = selectedTeam?.id === t.id;
-                  const isDq = t.name.startsWith("[DISQUALIFIED]");
-                  const isBusySubmitting = submittingTeamId === t.id;
-                  
-                  return (
-                    <button
-                      key={t.id}
-                      disabled={!!submittingTeamId}
-                      onClick={() => handleSelectTeam(t, scores, criteria, judge.id)}
-                      className={`
-                        w-full text-left p-2.5 sm:p-3 flex justify-between items-center transition-all duration-300 font-mono text-xs
-                        ${selected 
-                          ? "bg-cyber-cyan/15 border-l-4 border-cyber-cyan text-white shadow-[0_0_10px_rgba(6,182,212,0.1)]" 
-                          : "bg-cyber-bg-darker/60 hover:bg-cyber-cyan/5 border-l-2 border-gray-800 text-gray-400"
-                        }
-                        ${submittingTeamId ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}
-                      `}
+
+            {/* Search Results List */}
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between px-1">
+                <span className="font-mono text-xs text-gray-400 uppercase tracking-wider">
+                  {searchResults.length === 1 ? "1 TEAM FOUND" : `${searchResults.length} TEAMS FOUND`}
+                  {searchQuery && ` MATCHING "${searchQuery}"`}
+                </span>
+                <span className="font-mono text-[10px] text-gray-500">
+                  EVENT: {currentEvent?.name || selectedEventId}
+                </span>
+              </div>
+
+              {searchResults.length === 0 ? (
+                <div className="cyber-glass border border-cyber-cyan/15 p-12 text-center flex flex-col items-center justify-center gap-3">
+                  <AlertTriangle className="w-8 h-8 text-cyber-yellow" />
+                  <p className="font-orbitron text-sm text-gray-300 uppercase tracking-wider font-bold">
+                    NO TEAMS FOUND
+                  </p>
+                  <p className="text-xs text-gray-500 font-mono max-w-md">
+                    {searchQuery
+                      ? `No teams in "${currentEvent?.name || "this event"}" match "${searchQuery}". Check spelling or try a partial search keyword.`
+                      : `No teams matching filter "${statusFilter.toUpperCase()}" in this event.`}
+                  </p>
+                  {searchQuery && (
+                    <CyberButton
+                      variant="cyan"
+                      size="sm"
+                      onClick={() => setSearchQuery("")}
+                      className="mt-2"
                     >
-                      <span className={`truncate pr-2 font-medium ${isDq ? "line-through text-cyber-red" : ""}`}>
-                        {t.name}
-                      </span>
-                      {isBusySubmitting ? (
-                        <span className="flex items-center gap-1 text-[9px] text-cyber-yellow bg-cyber-yellow/10 px-1.5 py-0.5 uppercase font-bold shrink-0 animate-pulse">
-                          <RefreshCw className="w-2.5 h-2.5 animate-spin" /> SYNCING
-                        </span>
-                      ) : completed ? (
-                        <span className="flex items-center gap-1 text-[9px] text-cyber-green bg-cyber-green/10 px-1.5 py-0.5 uppercase font-bold shrink-0">
-                          <Lock className="w-2.5 h-2.5" /> LOCKED
-                        </span>
-                      ) : (
-                        <span className="text-[9px] text-cyber-yellow bg-cyber-yellow/10 px-1.5 py-0.5 uppercase shrink-0 font-semibold">
-                          PENDING
-                        </span>
-                      )}
-                    </button>
-                  );
-                })
+                      CLEAR SEARCH
+                    </CyberButton>
+                  )}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {searchResults.map((t) => {
+                    const completed = isTeamCompleted(t.id);
+                    const isDq = t.name.startsWith("[DISQUALIFIED]");
+                    const existingRecord = scores.find((s) => s.teamId === t.id && s.judgeId === judge.id);
+
+                    return (
+                      <div
+                        key={t.id}
+                        className={`p-5 border transition-all duration-200 flex flex-col justify-between gap-4 cyber-glass ${
+                          completed
+                            ? "border-cyber-green/40 bg-cyber-green/5 shadow-[0_0_15px_rgba(34,197,94,0.06)]"
+                            : isDq
+                            ? "border-cyber-red/30 bg-cyber-red/5"
+                            : "border-cyber-cyan/25 bg-cyber-bg-darker/60 hover:border-cyber-cyan/60 hover:shadow-[0_0_15px_rgba(6,182,212,0.12)]"
+                        }`}
+                      >
+                        {/* Top: Status Badges + Metadata */}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-grow">
+                            <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                              {completed ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-mono text-cyber-green bg-cyber-green/15 border border-cyber-green/40 px-2 py-0.5 font-bold uppercase tracking-wider">
+                                  <CheckCircle2 className="w-3 h-3" /> EVALUATED
+                                </span>
+                              ) : isDq ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-mono text-cyber-red bg-cyber-red/15 border border-cyber-red/40 px-2 py-0.5 font-bold uppercase tracking-wider">
+                                  <AlertOctagon className="w-3 h-3" /> DISQUALIFIED
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-mono text-cyber-yellow bg-cyber-yellow/15 border border-cyber-yellow/40 px-2 py-0.5 font-bold uppercase tracking-wider">
+                                  NOT EVALUATED
+                                </span>
+                              )}
+
+                              {t.teamCode && (
+                                <span className="text-[10px] font-mono text-gray-400 bg-black/40 border border-gray-800 px-1.5 py-0.5">
+                                  {t.teamCode}
+                                </span>
+                              )}
+
+                              {t.tableNumber !== undefined && (
+                                <span className="text-[10px] font-mono text-gray-500">
+                                  Table {t.tableNumber}
+                                </span>
+                              )}
+                            </div>
+
+                            <h3 className={`font-orbitron font-extrabold text-base sm:text-lg text-white uppercase tracking-wide truncate ${isDq ? "line-through text-cyber-red" : ""}`}>
+                              {t.name}
+                            </h3>
+
+                            {t.projectName && t.projectName !== t.name && (
+                              <p className="text-xs text-gray-400 font-mono mt-1 line-clamp-2">
+                                Project: {t.projectName}
+                              </p>
+                            )}
+
+                            {t.members && (
+                              <p className="text-[11px] text-gray-500 font-sans mt-1 truncate">
+                                Members: {t.members}
+                              </p>
+                            )}
+                          </div>
+
+                          {completed && existingRecord && (
+                            <div className="text-right shrink-0">
+                              <span className="text-[9px] font-mono text-gray-500 uppercase block">YOUR MARKS</span>
+                              <span className="font-orbitron font-extrabold text-lg text-cyber-green">
+                                {existingRecord.totalScore}
+                                <span className="text-[10px] text-gray-500 font-normal">/{criteria.length * 10}</span>
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Bottom: OPEN / VIEW Button */}
+                        <div className="flex items-center justify-between border-t border-white/5 pt-3 mt-1">
+                          <span className="text-[10px] font-mono text-gray-500 truncate">
+                            ID: {t.id}
+                          </span>
+
+                          <CyberButton
+                            variant={completed ? "green" : "cyan"}
+                            size="sm"
+                            onClick={() => handleSelectTeam(t, scores, criteria, judge.id)}
+                            className="flex items-center gap-1.5 px-4 font-bold"
+                          >
+                            {completed ? "VIEW EVALUATION" : "OPEN EVALUATION"}
+                          </CyberButton>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>
-        </section>
+        ) : (
+          /* ============================================================== */
+          /* VIEW B: FOCUSED TEAM EVALUATION VIEW                           */
+          /* ============================================================== */
+          <div className="flex flex-col gap-5 w-full">
+            {/* Top Back Navigation Bar */}
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setSelectedTeam(null)}
+                disabled={isSubmittingCurrentTeam}
+                className="flex items-center gap-2 text-xs font-mono text-cyber-cyan hover:text-white transition-colors cursor-pointer border border-cyber-cyan/30 bg-cyber-bg-darker/80 px-3 py-2 disabled:opacity-50"
+              >
+                <ArrowLeft className="w-4 h-4" /> ← BACK TO TEAM SEARCH
+              </button>
 
-        {/* Center: Dynamic Evaluator Sheet (Col 4-12 on desktop, full width on mobile) */}
-        <section className="lg:col-span-9 flex flex-col gap-6 w-full">
-          {selectedTeam ? (
-            <div className="cyber-glass border border-cyber-cyan/15 p-4 sm:p-6 flex flex-col gap-5 relative">
-              {/* Glowing header clip */}
-              <span className="absolute top-0 right-0 w-3 h-3 bg-cyber-cyan/40" />
+              <span className="text-[10px] font-mono text-gray-400 uppercase tracking-widest hidden sm:inline">
+                EVENT: {currentEvent?.name || selectedEventId}
+              </span>
+            </div>
 
+            {/* Team Evaluation Container */}
+            <div className="cyber-glass border border-cyber-cyan/25 p-5 sm:p-6 flex flex-col gap-6 relative shadow-[0_0_25px_rgba(6,182,212,0.08)]">
               {/* Header details */}
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-cyber-cyan/15 pb-4">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-cyber-cyan/15 pb-4">
+                <div className="min-w-0 flex-grow">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-[9px] font-mono text-cyber-cyan uppercase tracking-widest bg-cyber-cyan/10 px-2 py-0.5 border border-cyber-cyan/20">
                       EVALUATION TARGET
                     </span>
                     {selectedTeam.teamCode && (
-                      <span className="text-[9px] font-mono text-gray-400 bg-gray-900 px-1.5 py-0.5">
+                      <span className="text-[9px] font-mono text-gray-400 bg-gray-900 border border-gray-800 px-1.5 py-0.5">
                         {selectedTeam.teamCode}
                       </span>
                     )}
+                    {selectedTeam.tableNumber !== undefined && (
+                      <span className="text-[9px] font-mono text-gray-400 bg-gray-900 border border-gray-800 px-1.5 py-0.5">
+                        Table {selectedTeam.tableNumber}
+                      </span>
+                    )}
                   </div>
-                  <h2 className="font-orbitron font-extrabold text-lg sm:text-xl text-white tracking-wide mt-1.5 uppercase truncate">
+                  <h2 className="font-orbitron font-extrabold text-xl sm:text-2xl text-white tracking-wide mt-1.5 uppercase truncate">
                     {selectedTeam.name}
                   </h2>
                   {selectedTeam.projectName && selectedTeam.projectName !== selectedTeam.name && (
-                    <p className="text-xs text-gray-400 font-mono mt-0.5 truncate">
+                    <p className="text-xs text-gray-400 font-mono mt-0.5">
                       Project: {selectedTeam.projectName}
+                    </p>
+                  )}
+                  {selectedTeam.members && (
+                    <p className="text-[11px] text-gray-500 font-sans mt-0.5">
+                      Members: {selectedTeam.members}
                     </p>
                   )}
                 </div>
@@ -609,7 +808,7 @@ export default function JudgeDashboardPage() {
 
               {/* Lock Warning banner */}
               {isCurrentTeamLocked && (
-                <div className="bg-cyber-green/15 border border-cyber-green/30 p-3 flex items-start gap-3">
+                <div className="bg-cyber-green/15 border border-cyber-green/30 p-3.5 flex items-start gap-3">
                   <Lock className="w-5 h-5 text-cyber-green mt-0.5 shrink-0 animate-pulse" />
                   <div className="flex flex-col gap-0.5 font-mono text-xs">
                     <span className="text-cyber-green font-bold uppercase tracking-wider">
@@ -617,7 +816,7 @@ export default function JudgeDashboardPage() {
                     </span>
                     <p className="text-[11px] text-gray-400">
                       Scores locked as read-only at {currentRecord ? new Date(currentRecord.submittedAt).toLocaleTimeString() : "recorded time"}.
-                      Sign-off verified under: {currentRecord?.judgeSignOff?.name || judge.name} ({currentRecord?.judgeSignOff?.designation || judge.designation})
+                      Sign-off verified under: {currentRecord?.judgeSignOff?.name || judge.name} ({currentRecord?.judgeSignOff?.designation || judge.designation}).
                     </p>
                   </div>
                 </div>
@@ -625,7 +824,7 @@ export default function JudgeDashboardPage() {
 
               {/* Disqualified Warning */}
               {isTeamDisqualified && (
-                <div className="bg-cyber-red/15 border border-cyber-red/30 p-3 flex items-start gap-3">
+                <div className="bg-cyber-red/15 border border-cyber-red/30 p-3.5 flex items-start gap-3">
                   <AlertOctagon className="w-5 h-5 text-cyber-red mt-0.5 shrink-0" />
                   <div className="flex flex-col gap-0.5 font-mono text-xs">
                     <span className="text-cyber-red font-bold uppercase tracking-wider">
@@ -638,9 +837,7 @@ export default function JudgeDashboardPage() {
                 </div>
               )}
 
-              {/* ============================================================== */}
-              {/* REQUIREMENT 1: PROPER NUMERIC SCORE INPUTS (1-10) IN A BOX     */}
-              {/* ============================================================== */}
+              {/* 1-10 Numeric Score Input Boxes */}
               <div className="flex flex-col gap-4 py-1">
                 {criteria.map((c, index) => {
                   const scoreVal = evaluationScores[c.id] ?? 5;
@@ -652,7 +849,7 @@ export default function JudgeDashboardPage() {
                     <div 
                       key={c.id} 
                       className={`
-                        p-3.5 border transition-all duration-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3
+                        p-4 border transition-all duration-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3
                         ${errorMsg 
                           ? "border-cyber-red/60 bg-cyber-red/5" 
                           : isCurrentTeamLocked 
@@ -693,7 +890,7 @@ export default function JudgeDashboardPage() {
                           aria-label={`Decrease score for ${c.name}`}
                           disabled={isLocked || scoreVal <= 1}
                           onClick={() => handleStepScore(c.id, -1)}
-                          className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center border border-cyber-cyan/30 bg-cyber-bg-darker hover:bg-cyber-cyan/20 text-cyber-cyan disabled:opacity-25 disabled:cursor-not-allowed font-mono text-base font-bold transition-all active:scale-95"
+                          className="w-9 h-9 flex items-center justify-center border border-cyber-cyan/30 bg-cyber-bg-darker hover:bg-cyber-cyan/20 text-cyber-cyan disabled:opacity-25 disabled:cursor-not-allowed font-mono text-base font-bold transition-all active:scale-95"
                         >
                           -
                         </button>
@@ -710,7 +907,7 @@ export default function JudgeDashboardPage() {
                             value={strVal}
                             onChange={(e) => handleScoreInputChange(c.id, e.target.value)}
                             className={`
-                              w-14 h-9 sm:w-16 sm:h-10 text-center font-orbitron font-extrabold text-base sm:text-lg
+                              w-16 h-10 text-center font-orbitron font-extrabold text-lg
                               bg-cyber-bg-darker/90 border transition-all duration-200 outline-none
                               ${errorMsg 
                                 ? "border-cyber-red text-cyber-red shadow-[0_0_10px_rgba(244,63,94,0.4)]" 
@@ -728,7 +925,7 @@ export default function JudgeDashboardPage() {
                           aria-label={`Increase score for ${c.name}`}
                           disabled={isLocked || scoreVal >= 10}
                           onClick={() => handleStepScore(c.id, 1)}
-                          className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center border border-cyber-cyan/30 bg-cyber-bg-darker hover:bg-cyber-cyan/20 text-cyber-cyan disabled:opacity-25 disabled:cursor-not-allowed font-mono text-base font-bold transition-all active:scale-95"
+                          className="w-9 h-9 flex items-center justify-center border border-cyber-cyan/30 bg-cyber-bg-darker hover:bg-cyber-cyan/20 text-cyber-cyan disabled:opacity-25 disabled:cursor-not-allowed font-mono text-base font-bold transition-all active:scale-95"
                         >
                           +
                         </button>
@@ -744,40 +941,45 @@ export default function JudgeDashboardPage() {
               </div>
 
               {/* Action Submit Bar */}
-              {!isCurrentTeamLocked && !isTeamDisqualified && (
-                <div className="border-t border-cyber-cyan/15 pt-4 mt-2 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                  <p className="text-[10px] font-mono text-gray-500 uppercase leading-snug">
-                    ⚡ ALL METRICS ARE FINAL UPON SUBMISSION. SCORES ENCRYPTED TO NEON DB.
-                  </p>
-                  <CyberButton
-                    variant="cyan"
-                    size="md"
-                    onClick={handleFinalSubmit}
-                    disabled={isSubmittingCurrentTeam || !judgingOpen}
-                    className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-center"
-                  >
-                    {isSubmittingCurrentTeam ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin" /> SUBMITTING EVALUATION...
-                      </>
-                    ) : (
-                      <>
-                        <ShieldCheck className="w-4 h-4" /> SUBMIT EVALUATION
-                      </>
-                    )}
-                  </CyberButton>
+              <div className="border-t border-cyber-cyan/15 pt-4 mt-2 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <p className="text-[10px] font-mono text-gray-500 uppercase leading-snug">
+                  ⚡ ALL METRICS ARE FINAL UPON SUBMISSION. SCORES ENCRYPTED TO NEON DB.
+                </p>
+
+                <div className="flex items-center gap-3 w-full sm:w-auto">
+                  {isCurrentTeamLocked ? (
+                    <CyberButton
+                      variant="green"
+                      size="md"
+                      onClick={() => setSelectedTeam(null)}
+                      className="w-full sm:w-auto justify-center"
+                    >
+                      ← RETURN TO TEAM SEARCH
+                    </CyberButton>
+                  ) : (
+                    <CyberButton
+                      variant="cyan"
+                      size="md"
+                      onClick={handleFinalSubmit}
+                      disabled={isSubmittingCurrentTeam || !judgingOpen || isTeamDisqualified}
+                      className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-center"
+                    >
+                      {isSubmittingCurrentTeam ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" /> SUBMITTING EVALUATION...
+                        </>
+                      ) : (
+                        <>
+                          <ShieldCheck className="w-4 h-4" /> SUBMIT EVALUATION
+                        </>
+                      )}
+                    </CyberButton>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
-          ) : (
-            <div className="cyber-glass border border-cyber-cyan/15 p-12 text-center flex flex-col items-center justify-center gap-4">
-              <AlertTriangle className="w-8 h-8 text-cyber-yellow animate-pulse" />
-              <p className="font-orbitron text-sm text-gray-400 uppercase tracking-widest">
-                NO TEAM DATA REGISTERED FOR THIS EVENT
-              </p>
-            </div>
-          )}
-        </section>
+          </div>
+        )}
 
       </main>
     </div>
