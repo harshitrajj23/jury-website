@@ -11,16 +11,21 @@ import {
   Sparkles,
   CheckCircle2,
   XCircle,
-  AlertOctagon
+  AlertOctagon,
+  RefreshCw,
+  Layers,
+  ChevronDown,
+  Calendar
 } from "lucide-react";
 import { 
   getTeams, 
   getJudgeScores, 
   getConfig, 
   submitScores, 
-  initDatabase
+  initDatabase,
+  getEvents
 } from "@/lib/db";
-import { Team, ScoringCriteria, ScoreRecord, Judge } from "@/lib/types";
+import { Team, ScoringCriteria, ScoreRecord, Judge, EventItem } from "@/lib/types";
 import { useRealtimeSync } from "@/lib/useRealtimeSync";
 import CyberButton from "@/components/CyberButton";
 import Timer from "@/components/Timer";
@@ -32,31 +37,42 @@ export default function JudgeDashboardPage() {
   // Authentication & Session
   const [judge, setJudge] = useState<Judge | null>(null);
   
+  // Events state
+  const [events, setEvents] = useState<EventItem[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState<string>("default_event");
+  const [currentEvent, setCurrentEvent] = useState<EventItem | null>(null);
+
   // DB State
   const [teams, setTeams] = useState<Team[]>([]);
   const [criteria, setCriteria] = useState<ScoringCriteria[]>([]);
   const [scores, setScores] = useState<ScoreRecord[]>([]);
   const [announceResults, setAnnounceResults] = useState(false);
   const [judgingOpen, setJudgingOpen] = useState(true);
-  const [timerDuration, setTimerDuration] = useState(480);
+  const [timerDuration, setTimerDuration] = useState(300);
   
   // Interactive UI State
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [evaluationScores, setEvaluationScores] = useState<Record<string, number>>({});
+  const [scoreInputs, setScoreInputs] = useState<Record<string, string>>({});
+  const [inputErrors, setInputErrors] = useState<Record<string, string>>({});
   
   // Feedback Toasts
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
   
-  // UX States
+  // UX States - Team-scoped submission to prevent cross-team contamination
   const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState(false);
+  const [submittingTeamId, setSubmittingTeamId] = useState<string | null>(null);
   const isInitialLoadRef = useRef(true);
   const selectedTeamRef = useRef<Team | null>(null);
-  const isSubmittingRef = useRef(false);
+  const currentEventIdRef = useRef<string>("default_event");
 
   useEffect(() => {
     selectedTeamRef.current = selectedTeam;
   }, [selectedTeam]);
+
+  useEffect(() => {
+    currentEventIdRef.current = selectedEventId;
+  }, [selectedEventId]);
 
   const showFeedback = (type: "success" | "error", message: string) => {
     setFeedback({ type, message });
@@ -65,27 +81,37 @@ export default function JudgeDashboardPage() {
     }, 5000);
   };
   
-  const fetchData = async (judgeId: string, isBackground = false) => {
+  const fetchData = async (judgeId: string, eventId: string = selectedEventId, isBackground = false) => {
     if (!isBackground && isInitialLoadRef.current) {
       setLoading(true);
     }
     try {
-      const [allTeams, judgeScores, config] = await Promise.all([
-        getTeams(),
-        getJudgeScores(judgeId),
-        getConfig(),
+      const [eventsList, allTeams, judgeScores, config] = await Promise.all([
+        getEvents(),
+        getTeams(eventId),
+        getJudgeScores(judgeId, eventId),
+        getConfig(eventId),
       ]);
       
+      setEvents(eventsList || []);
+      const matchedEv = eventsList.find((e) => e.id === eventId) || config.event || null;
+      setCurrentEvent(matchedEv);
+
       setTeams(allTeams || []);
       setScores(judgeScores || []);
       setCriteria(config?.criteriaList || []);
       setAnnounceResults(Boolean(config?.announceResults));
       setJudgingOpen(config?.judgingOpen !== false);
-      setTimerDuration(config?.timerDuration || 480);
+      setTimerDuration(config?.timerDuration || 300);
       
-      // Auto-select first active team on initial load if none selected yet
-      if (!selectedTeamRef.current && allTeams && allTeams.length > 0) {
-        handleSelectTeam(allTeams[0], judgeScores || [], config?.criteriaList || [], judgeId);
+      // Auto-select team on initial load or if current team belongs to different event
+      if (allTeams && allTeams.length > 0) {
+        const stillValid = selectedTeamRef.current && allTeams.some((t) => t.id === selectedTeamRef.current?.id);
+        if (!stillValid) {
+          handleSelectTeam(allTeams[0], judgeScores || [], config?.criteriaList || [], judgeId);
+        }
+      } else {
+        setSelectedTeam(null);
       }
       isInitialLoadRef.current = false;
     } catch (err) {
@@ -108,21 +134,25 @@ export default function JudgeDashboardPage() {
     try {
       const parsedJudge = JSON.parse(session) as Judge;
       setJudge(parsedJudge);
-      fetchData(parsedJudge.id, false);
+      const initialEventId = parsedJudge.eventId || "default_event";
+      setSelectedEventId(initialEventId);
+      currentEventIdRef.current = initialEventId;
+      fetchData(parsedJudge.id, initialEventId, false);
     } catch (e) {
       router.push("/");
     }
   }, [router]);
 
-  // Realtime WebSocket sync — auto-refresh silently when DB changes
+  // Realtime sync scoped to current eventId
   const handleRealtimeChange = useCallback(() => {
     if (judge) {
-      fetchData(judge.id, true);
+      fetchData(judge.id, currentEventIdRef.current, true);
     }
   }, [judge]);
 
   const realtimeStatus = useRealtimeSync({
-    tables: ["Score", "Team", "Settings", "Criteria"],
+    tables: ["Score", "Team", "Settings", "Criteria", "Event"],
+    eventId: selectedEventId,
     onDataChange: handleRealtimeChange,
     enabled: !!judge,
     intervalMs: 20000,
@@ -134,31 +164,106 @@ export default function JudgeDashboardPage() {
     activeCriteria: ScoringCriteria[],
     judgeId: string
   ) => {
+    // Prevent switching while current team evaluation is in flight
+    if (submittingTeamId) return;
+
     setSelectedTeam(team);
+    setInputErrors({});
     
     // Check if score record already exists for this team by this judge
     const matchedRecord = allScores.find(
       (s) => s.teamId === team.id && s.judgeId === judgeId
     );
     
+    const rawScores: Record<string, number> = {};
+    const strInputs: Record<string, string> = {};
+
     if (matchedRecord) {
-      setEvaluationScores(matchedRecord.scores);
-    } else {
-      // Default to mid-range score (5) for all criteria
-      const defaultScores: Record<string, number> = {};
       activeCriteria.forEach((c) => {
-        defaultScores[c.id] = 5;
+        const val = matchedRecord.scores[c.id] ?? 5;
+        rawScores[c.id] = val;
+        strInputs[c.id] = String(val);
       });
-      setEvaluationScores(defaultScores);
+    } else {
+      // Default to mid-range score (5) for all active criteria
+      activeCriteria.forEach((c) => {
+        rawScores[c.id] = 5;
+        strInputs[c.id] = "5";
+      });
+    }
+
+    setEvaluationScores(rawScores);
+    setScoreInputs(strInputs);
+  };
+
+  const handleEventChange = (newEvId: string) => {
+    if (submittingTeamId) return;
+    setSelectedEventId(newEvId);
+    currentEventIdRef.current = newEvId;
+    setSelectedTeam(null);
+    setInputErrors({});
+    if (judge) {
+      fetchData(judge.id, newEvId, false);
     }
   };
 
-  const handleScoreChange = (criteriaId: string, val: number) => {
-    // Keep strictly between 1 and 10
-    const clamped = Math.max(1, Math.min(10, Math.round(val)));
+  // Strict integer 1-10 validation handler
+  const handleScoreInputChange = (criteriaId: string, rawStr: string) => {
+    setScoreInputs((prev) => ({ ...prev, [criteriaId]: rawStr }));
+
+    const trimmed = rawStr.trim();
+    if (trimmed === "") {
+      setInputErrors((prev) => ({ ...prev, [criteriaId]: "Score is required (1–10)" }));
+      return;
+    }
+
+    // Check if non-integer / decimal
+    if (!/^-?\d+$/.test(trimmed)) {
+      setInputErrors((prev) => ({ ...prev, [criteriaId]: "Only whole integers allowed (no decimals)" }));
+      return;
+    }
+
+    const num = parseInt(trimmed, 10);
+    if (isNaN(num)) {
+      setInputErrors((prev) => ({ ...prev, [criteriaId]: "Invalid numeric score" }));
+      return;
+    }
+
+    if (num < 1) {
+      setInputErrors((prev) => ({ ...prev, [criteriaId]: "Minimum score is 1" }));
+      return;
+    }
+
+    if (num > 10) {
+      setInputErrors((prev) => ({ ...prev, [criteriaId]: "Maximum score is 10" }));
+      return;
+    }
+
+    // Valid integer 1-10
+    setInputErrors((prev) => {
+      const copy = { ...prev };
+      delete copy[criteriaId];
+      return copy;
+    });
+
     setEvaluationScores((prev) => ({
       ...prev,
-      [criteriaId]: clamped,
+      [criteriaId]: num,
+    }));
+  };
+
+  const handleStepScore = (criteriaId: string, delta: number) => {
+    const current = evaluationScores[criteriaId] ?? 5;
+    const next = Math.max(1, Math.min(10, current + delta));
+    setScoreInputs((prev) => ({ ...prev, [criteriaId]: String(next) }));
+    setInputErrors((prev) => {
+      const copy = { ...prev };
+      delete copy[criteriaId];
+      return copy;
+    });
+    setEvaluationScores((prev) => ({
+      ...prev,
+      [criteriaId]: next,
     }));
   };
 
@@ -174,15 +279,16 @@ export default function JudgeDashboardPage() {
 
   const isCurrentTeamLocked = !!currentRecord;
   const isTeamDisqualified = selectedTeam?.name.startsWith("[DISQUALIFIED]");
+  const isSubmittingCurrentTeam = submittingTeamId === selectedTeam?.id;
 
   // Calculate live sum
   const calculateTotal = () => {
     return Object.values(evaluationScores).reduce((sum, score) => sum + (Number(score) || 0), 0);
   };
 
-  // Submit evaluation with multi-click protection & atomic batch execution
+  // Submit evaluation with multi-click protection, timeout recovery & atomic batch execution
   const handleFinalSubmit = async () => {
-    if (!selectedTeam || !judge || isSubmittingRef.current || actionLoading) return;
+    if (!selectedTeam || !judge || submittingTeamId) return;
     
     if (!judgingOpen) {
       showFeedback("error", "JUDGING_LOCKED: Judging is currently paused by the administrator.");
@@ -194,24 +300,39 @@ export default function JudgeDashboardPage() {
       return;
     }
 
-    // Validate all active criteria are scored
+    // 1. Validate all active criteria are scored with integers 1-10
+    const newErrors: Record<string, string> = {};
     for (const c of criteria) {
+      const rawInput = (scoreInputs[c.id] ?? "").trim();
       const val = evaluationScores[c.id];
-      if (val === undefined || val === null || val < 1 || val > 10) {
-        showFeedback("error", `VALIDATION_ERROR: Missing valid score (1-10) for "${c.name}".`);
-        return;
+
+      if (rawInput === "" || val === undefined || val === null) {
+        newErrors[c.id] = "Score is required (1–10)";
+        continue;
+      }
+
+      if (!Number.isInteger(val) || val < 1 || val > 10) {
+        newErrors[c.id] = "Must be integer between 1 and 10";
       }
     }
 
-    isSubmittingRef.current = true;
-    setActionLoading(true);
+    if (Object.keys(newErrors).length > 0) {
+      setInputErrors(newErrors);
+      showFeedback("error", "VALIDATION_ERROR: Please enter valid integer marks (1–10) for all criteria.");
+      return;
+    }
+
+    // Lock submission specifically to this team
+    const teamToSubmit = selectedTeam;
+    setSubmittingTeamId(teamToSubmit.id);
     
     const record: ScoreRecord = {
-      teamId: selectedTeam.id,
+      teamId: teamToSubmit.id,
       judgeId: judge.id,
       scores: evaluationScores,
       totalScore: calculateTotal(),
       submittedAt: new Date().toISOString(),
+      eventId: selectedEventId,
       judgeSignOff: {
         name: judge.name,
         designation: judge.designation,
@@ -220,21 +341,36 @@ export default function JudgeDashboardPage() {
     };
 
     try {
-      const res = await submitScores(record);
+      // 8-second safety timeout protection against infinite hanging
+      const timeoutPromise = new Promise<{ success: boolean; error?: string }>((_, reject) =>
+        setTimeout(() => reject(new Error("NETWORK_TIMEOUT: Submission took longer than 8 seconds. Please verify connection and retry.")), 8000)
+      );
+
+      const res = await Promise.race([submitScores(record, selectedEventId), timeoutPromise]);
+
       if (!res.success) {
         showFeedback("error", res.error || "TRANSMISSION_ERROR: Score submission rejected.");
+        setSubmittingTeamId(null);
         return;
       }
       
-      // Re-fetch scoped scores to update locked state immediately
-      const updatedScores = await getJudgeScores(judge.id);
-      setScores(updatedScores);
-      showFeedback("success", `✅ EVALUATION ENCRYPTED & SUBMITTED FOR ${selectedTeam.name.toUpperCase()}`);
+      // Optimistically update local scores immediately so lock banner appears without waiting
+      setScores((prev) => {
+        const filtered = prev.filter((s) => !(s.teamId === teamToSubmit.id && s.judgeId === judge.id));
+        return [...filtered, record];
+      });
+
+      showFeedback("success", `✅ EVALUATION ENCRYPTED & SUBMITTED FOR ${teamToSubmit.name.toUpperCase()}`);
+      
+      // Background refetch to ensure complete DB synchronization
+      getJudgeScores(judge.id, selectedEventId).then((updatedScores) => {
+        setScores(updatedScores);
+      }).catch(console.error);
+
     } catch (err: any) {
-      showFeedback("error", `FAIL: TRANSMISSION TIMEOUT (${err?.message || "Database error"})`);
+      showFeedback("error", `FAIL: ${err?.message || "Score submission timed out or failed"}`);
     } finally {
-      setActionLoading(false);
-      isSubmittingRef.current = false;
+      setSubmittingTeamId(null);
     }
   };
 
@@ -247,43 +383,85 @@ export default function JudgeDashboardPage() {
 
   if (loading || !judge) {
     return (
-      <div className="min-h-screen bg-cyber-bg flex justify-center items-center font-mono text-cyber-cyan">
+      <div className="min-h-screen bg-cyber-bg flex justify-center items-center font-mono text-cyber-cyan p-4">
         <div className="flex flex-col items-center gap-3">
-          <Clock className="w-10 h-10 animate-spin" />
-          <p className="font-orbitron tracking-widest text-sm uppercase">LOADING SECURE JURY ENVIRONMENT...</p>
+          <Clock className="w-10 h-10 animate-spin text-cyber-cyan" />
+          <p className="font-orbitron tracking-widest text-sm uppercase text-center">LOADING SECURE JURY ENVIRONMENT...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex flex-col relative pb-10">
+    <div className="min-h-screen flex flex-col relative pb-10 overflow-x-hidden">
       {/* Dynamic Header */}
-      <header className="border-b border-cyber-cyan/15 bg-cyber-bg-darker/90 backdrop-blur-md sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <span className="p-2 bg-cyber-cyan/10 text-cyber-cyan border border-cyber-cyan/20">
-              <Sparkles className="w-5 h-5 animate-pulse" />
-            </span>
-            <div>
-              <h1 className="font-orbitron font-extrabold text-lg text-white tracking-widest text-glow-cyan uppercase">
-                SCORESPHERE JUDGING DECK
+      <header className="border-b border-cyber-cyan/15 bg-cyber-bg-darker/95 backdrop-blur-md sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          
+          {/* Left: Branding & Event Identity */}
+          <div className="flex items-center gap-3 min-w-0">
+            {currentEvent?.logo ? (
+              <div className="p-1.5 bg-black/40 border border-cyber-cyan/20 flex items-center justify-center shrink-0">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img 
+                  src={currentEvent.logo} 
+                  alt={currentEvent.name} 
+                  className="h-8 max-w-[120px] object-contain"
+                  onError={(e) => {
+                    // Fallback to icon if image fails
+                    (e.target as HTMLElement).style.display = 'none';
+                  }}
+                />
+              </div>
+            ) : (
+              <span className="p-2 bg-cyber-cyan/10 text-cyber-cyan border border-cyber-cyan/20 shrink-0">
+                <Sparkles className="w-5 h-5 animate-pulse" />
+              </span>
+            )}
+            
+            <div className="min-w-0">
+              <h1 className="font-orbitron font-extrabold text-base sm:text-lg text-white tracking-widest text-glow-cyan uppercase truncate">
+                {currentEvent?.name || "SCORESPHERE JUDGING DECK"}
               </h1>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className={`w-1.5 h-1.5 rounded-full ${realtimeStatus === "connected" ? "bg-cyber-green animate-ping" : realtimeStatus === "connecting" ? "bg-cyber-yellow animate-pulse" : "bg-cyber-red"}`} />
-                <span className="font-mono text-[9px] text-cyber-cyan tracking-wider">
-                  {realtimeStatus === "connected" ? "⚡ LIVE" : realtimeStatus === "connecting" ? "SYNCING" : "OFFLINE"} • JUDGE: {judge.name.toUpperCase()} ({judge.designation.toUpperCase()}) • [{completedCount}/{teams.length} EVALUATED]
+              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${realtimeStatus === "connected" ? "bg-cyber-green animate-ping" : "bg-cyber-yellow"}`} />
+                <span className="font-mono text-[9px] text-cyber-cyan tracking-wider truncate">
+                  {realtimeStatus === "connected" ? "⚡ LIVE SYNC" : "OFFLINE / POLLING"} • JUDGE: {judge.name.toUpperCase()} • [{completedCount}/{teams.length} EVALUATED]
                 </span>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-3 flex-wrap">
+          {/* Right: Event Switcher & Logout */}
+          <div className="flex items-center gap-2.5 flex-wrap justify-between md:justify-end">
+            {/* Event Selector Dropdown */}
+            {events.length > 1 && (
+              <div className="flex items-center gap-1.5 bg-cyber-bg-darker border border-cyber-cyan/25 px-2.5 py-1 text-xs font-mono">
+                <Layers className="w-3.5 h-3.5 text-cyber-cyan shrink-0" />
+                <label htmlFor="dashboard-event-select" className="sr-only">Select Event</label>
+                <select
+                  id="dashboard-event-select"
+                  aria-label="Select Evaluation Event"
+                  value={selectedEventId}
+                  onChange={(e) => handleEventChange(e.target.value)}
+                  disabled={!!submittingTeamId}
+                  className="bg-transparent text-gray-200 outline-none cursor-pointer pr-1 text-xs"
+                >
+                  {events.map((ev) => (
+                    <option key={ev.id} value={ev.id} className="bg-gray-900 text-white">
+                      {ev.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <CyberButton
               variant="red"
               size="sm"
               onClick={handleLogout}
-              className="flex items-center gap-1.5"
+              disabled={!!submittingTeamId}
+              className="flex items-center gap-1.5 shrink-0"
             >
               <LogOut className="w-3.5 h-3.5" /> DISCONNECT
             </CyberButton>
@@ -310,56 +488,64 @@ export default function JudgeDashboardPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 mt-4 w-full">
           <div className="p-3 bg-cyber-yellow/15 border border-cyber-yellow/40 text-cyber-yellow font-mono text-xs flex items-center gap-3">
             <AlertOctagon className="w-4 h-4 shrink-0 animate-pulse" />
-            <span>⚡ NOTICE: Judging evaluation is currently paused by master control. Submissions are temporarily frozen.</span>
+            <span>⚡ NOTICE: Judging evaluation is currently paused for this event. Submissions are temporarily frozen.</span>
           </div>
         </div>
       )}
 
       {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 mt-6 flex-grow grid grid-cols-1 lg:grid-cols-12 gap-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 mt-6 flex-grow grid grid-cols-1 lg:grid-cols-12 gap-6 w-full">
         
-        {/* Left Side: Sidebar team selectors (Col 1-3) */}
+        {/* Left Side: Sidebar team selectors (Col 1-3 on desktop, full width on mobile) */}
         <section className="lg:col-span-3 flex flex-col gap-6">
-          <div className="cyber-glass border border-cyber-cyan/15 p-4 flex flex-col gap-4">
+          <div className="cyber-glass border border-cyber-cyan/15 p-4 flex flex-col gap-3">
             <div className="flex justify-between items-center border-b border-cyber-cyan/15 pb-2">
-              <h3 className="font-orbitron text-xs font-bold text-cyber-cyan tracking-wider uppercase">
+              <h2 className="font-orbitron text-xs font-bold text-cyber-cyan tracking-wider uppercase">
                 📂 TEAMS ({teams.length})
-              </h3>
+              </h2>
               <span className="font-mono text-[9px] text-gray-400">
                 {completedCount}/{teams.length} DONE
               </span>
             </div>
             
-            <div className="flex flex-col gap-2 max-h-[450px] overflow-y-auto pr-1">
+            {/* Scrollable teams list */}
+            <div className="flex flex-col gap-2 max-h-[380px] lg:max-h-[460px] overflow-y-auto pr-1">
               {teams.length === 0 ? (
-                <p className="text-xs text-gray-500 font-mono italic">No teams loaded by central system.</p>
+                <p className="text-xs text-gray-500 font-mono italic p-2">No teams registered for this event yet.</p>
               ) : (
                 teams.map((t) => {
                   const completed = isTeamCompleted(t.id);
                   const selected = selectedTeam?.id === t.id;
                   const isDq = t.name.startsWith("[DISQUALIFIED]");
+                  const isBusySubmitting = submittingTeamId === t.id;
                   
                   return (
                     <button
                       key={t.id}
+                      disabled={!!submittingTeamId}
                       onClick={() => handleSelectTeam(t, scores, criteria, judge.id)}
                       className={`
-                        w-full text-left p-3 flex justify-between items-center transition-all duration-300 font-mono text-xs
+                        w-full text-left p-2.5 sm:p-3 flex justify-between items-center transition-all duration-300 font-mono text-xs
                         ${selected 
                           ? "bg-cyber-cyan/15 border-l-4 border-cyber-cyan text-white shadow-[0_0_10px_rgba(6,182,212,0.1)]" 
                           : "bg-cyber-bg-darker/60 hover:bg-cyber-cyan/5 border-l-2 border-gray-800 text-gray-400"
                         }
+                        ${submittingTeamId ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}
                       `}
                     >
                       <span className={`truncate pr-2 font-medium ${isDq ? "line-through text-cyber-red" : ""}`}>
                         {t.name}
                       </span>
-                      {completed ? (
-                        <span className="flex items-center gap-1 text-[10px] text-cyber-green bg-cyber-green/10 px-1.5 py-0.5 uppercase font-bold shrink-0">
+                      {isBusySubmitting ? (
+                        <span className="flex items-center gap-1 text-[9px] text-cyber-yellow bg-cyber-yellow/10 px-1.5 py-0.5 uppercase font-bold shrink-0 animate-pulse">
+                          <RefreshCw className="w-2.5 h-2.5 animate-spin" /> SYNCING
+                        </span>
+                      ) : completed ? (
+                        <span className="flex items-center gap-1 text-[9px] text-cyber-green bg-cyber-green/10 px-1.5 py-0.5 uppercase font-bold shrink-0">
                           <Lock className="w-2.5 h-2.5" /> LOCKED
                         </span>
                       ) : (
-                        <span className="text-[10px] text-cyber-yellow bg-cyber-yellow/10 px-1.5 py-0.5 uppercase shrink-0 font-semibold">
+                        <span className="text-[9px] text-cyber-yellow bg-cyber-yellow/10 px-1.5 py-0.5 uppercase shrink-0 font-semibold">
                           PENDING
                         </span>
                       )}
@@ -374,27 +560,42 @@ export default function JudgeDashboardPage() {
           <Timer duration={timerDuration} />
 
           {/* Compliance Rules Panel */}
-          <RulesPanel />
+          <div className="hidden lg:block">
+            <RulesPanel />
+          </div>
         </section>
 
-        {/* Center: Dynamic Evaluator Sheet (Col 4-12) */}
-        <section className="lg:col-span-9 flex flex-col gap-6">
+        {/* Center: Dynamic Evaluator Sheet (Col 4-12 on desktop, full width on mobile) */}
+        <section className="lg:col-span-9 flex flex-col gap-6 w-full">
           {selectedTeam ? (
-            <div className="cyber-glass border border-cyber-cyan/15 p-6 flex flex-col gap-6 relative">
-              {/* Glowing header clips */}
+            <div className="cyber-glass border border-cyber-cyan/15 p-4 sm:p-6 flex flex-col gap-5 relative">
+              {/* Glowing header clip */}
               <span className="absolute top-0 right-0 w-3 h-3 bg-cyber-cyan/40" />
 
               {/* Header details */}
-              <div className="flex justify-between items-start gap-4 border-b border-cyber-cyan/15 pb-4">
-                <div>
-                  <span className="text-[9px] font-mono text-cyber-cyan uppercase tracking-widest bg-cyber-cyan/10 px-2 py-0.5 border border-cyber-cyan/20">
-                    EVALUATION TARGET
-                  </span>
-                  <h2 className="font-orbitron font-extrabold text-xl text-white tracking-wide mt-1.5 uppercase">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-cyber-cyan/15 pb-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-mono text-cyber-cyan uppercase tracking-widest bg-cyber-cyan/10 px-2 py-0.5 border border-cyber-cyan/20">
+                      EVALUATION TARGET
+                    </span>
+                    {selectedTeam.teamCode && (
+                      <span className="text-[9px] font-mono text-gray-400 bg-gray-900 px-1.5 py-0.5">
+                        {selectedTeam.teamCode}
+                      </span>
+                    )}
+                  </div>
+                  <h2 className="font-orbitron font-extrabold text-lg sm:text-xl text-white tracking-wide mt-1.5 uppercase truncate">
                     {selectedTeam.name}
                   </h2>
+                  {selectedTeam.projectName && selectedTeam.projectName !== selectedTeam.name && (
+                    <p className="text-xs text-gray-400 font-mono mt-0.5 truncate">
+                      Project: {selectedTeam.projectName}
+                    </p>
+                  )}
                 </div>
-                <div className="text-right">
+
+                <div className="text-left sm:text-right shrink-0">
                   <span className="text-[9px] font-mono text-gray-500 uppercase tracking-wider block">
                     TOTAL RATING CARD
                   </span>
@@ -413,8 +614,8 @@ export default function JudgeDashboardPage() {
                       🔒 SUBMISSION FINALIZED & ENCRYPTED
                     </span>
                     <p className="text-[11px] text-gray-400">
-                      Scores locked as read-only on database at {new Date(currentRecord.submittedAt).toLocaleTimeString()}.
-                      Sign-off verified under: {currentRecord.judgeSignOff?.name || judge.name} ({currentRecord.judgeSignOff?.designation || judge.designation})
+                      Scores locked as read-only at {currentRecord ? new Date(currentRecord.submittedAt).toLocaleTimeString() : "recorded time"}.
+                      Sign-off verified under: {currentRecord?.judgeSignOff?.name || judge.name} ({currentRecord?.judgeSignOff?.designation || judge.designation})
                     </p>
                   </div>
                 </div>
@@ -435,93 +636,133 @@ export default function JudgeDashboardPage() {
                 </div>
               )}
 
-              {/* Grid of Sliders */}
-              <div className="flex flex-col gap-5 py-2">
+              {/* ============================================================== */}
+              {/* REQUIREMENT 1: PROPER NUMERIC SCORE INPUTS (1-10) IN A BOX     */}
+              {/* ============================================================== */}
+              <div className="flex flex-col gap-4 py-1">
                 {criteria.map((c, index) => {
-                  const scoreVal = evaluationScores[c.id] || 5;
-                  const isLocked = isCurrentTeamLocked || isTeamDisqualified || !judgingOpen;
-                  
+                  const scoreVal = evaluationScores[c.id] ?? 5;
+                  const strVal = scoreInputs[c.id] !== undefined ? scoreInputs[c.id] : String(scoreVal);
+                  const isLocked = isCurrentTeamLocked || isTeamDisqualified || !judgingOpen || isSubmittingCurrentTeam;
+                  const errorMsg = inputErrors[c.id];
+
                   return (
                     <div 
                       key={c.id} 
                       className={`
-                        p-3 border transition-all duration-300
-                        ${isCurrentTeamLocked 
-                          ? "border-gray-800 bg-cyber-bg-darker/20" 
-                          : "border-cyber-cyan/10 bg-cyber-bg-darker/35 hover:border-cyber-cyan/20"
+                        p-3.5 border transition-all duration-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3
+                        ${errorMsg 
+                          ? "border-cyber-red/60 bg-cyber-red/5" 
+                          : isCurrentTeamLocked 
+                          ? "border-gray-800 bg-cyber-bg-darker/25" 
+                          : "border-cyber-cyan/15 bg-cyber-bg-darker/40 hover:border-cyber-cyan/35"
                         }
                       `}
                     >
-                      <div className="flex justify-between items-center mb-2">
-                        <div>
-                          <span className="font-orbitron text-xs font-bold tracking-wider text-gray-200 uppercase">
+                      {/* Left: Criteria Title & Description */}
+                      <div className="flex-grow min-w-0 pr-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-orbitron text-xs sm:text-sm font-bold tracking-wider text-gray-100 uppercase">
                             {index + 1}. {c.name}
                           </span>
                           {c.weight && (
-                            <span className="text-[9px] font-mono text-cyber-cyan/60 ml-2">
-                              (Weight: {c.weight})
+                            <span className="text-[10px] font-mono text-cyber-cyan/70 bg-cyber-cyan/10 px-1.5 py-0.2 border border-cyber-cyan/20">
+                              Weight: {c.weight}
                             </span>
                           )}
                         </div>
-                        
-                        <div className="flex items-center gap-1.5">
-                          <span className={`w-7 h-7 flex items-center justify-center font-mono text-xs font-bold border ${isCurrentTeamLocked ? "border-gray-700 text-cyber-green" : "border-cyber-cyan/30 text-cyber-cyan"}`}>
-                            {scoreVal}
+                        {c.description && (
+                          <p className="text-[11px] font-sans text-gray-400 mt-1 leading-snug">
+                            {c.description}
+                          </p>
+                        )}
+                        {errorMsg && (
+                          <span className="text-[10px] font-mono text-cyber-red mt-1 block font-bold animate-pulse">
+                            ⚠️ {errorMsg}
                           </span>
-                        </div>
+                        )}
                       </div>
 
-                      <div className="flex items-center gap-4">
-                        <input
-                          type="range"
-                          min="1"
-                          max="10"
-                          value={scoreVal}
-                          onChange={(e) => handleScoreChange(c.id, parseInt(e.target.value))}
-                          disabled={isLocked}
-                          className="flex-grow accent-cyber-cyan cursor-pointer disabled:cursor-not-allowed disabled:accent-cyber-green"
-                        />
-                        <div className="flex gap-1">
-                          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
-                            <button
-                              key={num}
-                              disabled={isLocked}
-                              onClick={() => handleScoreChange(c.id, num)}
-                              className={`
-                                w-4 h-4 font-mono text-[9px] flex items-center justify-center transition-all duration-200 border
-                                ${scoreVal === num 
-                                  ? (isCurrentTeamLocked 
-                                      ? "bg-cyber-green/20 border-cyber-green text-cyber-green" 
-                                      : "bg-cyber-cyan/20 border-cyber-cyan text-cyber-cyan font-bold"
-                                    ) 
-                                  : "border-gray-800 hover:border-gray-600 text-gray-500 hover:text-gray-300"
-                                }
-                              `}
-                            >
-                              {num}
-                            </button>
-                          ))}
+                      {/* Right: Direct Numeric Input Box with Touch Steppers */}
+                      <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                        {/* Minus Button */}
+                        <button
+                          type="button"
+                          aria-label={`Decrease score for ${c.name}`}
+                          disabled={isLocked || scoreVal <= 1}
+                          onClick={() => handleStepScore(c.id, -1)}
+                          className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center border border-cyber-cyan/30 bg-cyber-bg-darker hover:bg-cyber-cyan/20 text-cyber-cyan disabled:opacity-25 disabled:cursor-not-allowed font-mono text-base font-bold transition-all active:scale-95"
+                        >
+                          -
+                        </button>
+
+                        {/* Numeric Input Box */}
+                        <div className="relative">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            maxLength={2}
+                            aria-label={`Enter score between 1 and 10 for ${c.name}`}
+                            disabled={isLocked}
+                            value={strVal}
+                            onChange={(e) => handleScoreInputChange(c.id, e.target.value)}
+                            className={`
+                              w-14 h-9 sm:w-16 sm:h-10 text-center font-orbitron font-extrabold text-base sm:text-lg
+                              bg-cyber-bg-darker/90 border transition-all duration-200 outline-none
+                              ${errorMsg 
+                                ? "border-cyber-red text-cyber-red shadow-[0_0_10px_rgba(244,63,94,0.4)]" 
+                                : isCurrentTeamLocked 
+                                ? "border-gray-700 text-cyber-green cursor-not-allowed"
+                                : "border-cyber-cyan/50 text-white focus:border-cyber-cyan focus:shadow-[0_0_12px_rgba(6,182,212,0.4)]"
+                              }
+                            `}
+                          />
                         </div>
+
+                        {/* Plus Button */}
+                        <button
+                          type="button"
+                          aria-label={`Increase score for ${c.name}`}
+                          disabled={isLocked || scoreVal >= 10}
+                          onClick={() => handleStepScore(c.id, 1)}
+                          className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center border border-cyber-cyan/30 bg-cyber-bg-darker hover:bg-cyber-cyan/20 text-cyber-cyan disabled:opacity-25 disabled:cursor-not-allowed font-mono text-base font-bold transition-all active:scale-95"
+                        >
+                          +
+                        </button>
+
+                        {/* Out of 10 Indicator */}
+                        <span className="font-mono text-xs text-gray-500 font-bold ml-1 min-w-[28px]">
+                          / 10
+                        </span>
                       </div>
                     </div>
                   );
                 })}
               </div>
 
-              {/* Action Buttons */}
+              {/* Action Submit Bar */}
               {!isCurrentTeamLocked && !isTeamDisqualified && (
-                <div className="border-t border-cyber-cyan/15 pt-4 mt-2 flex justify-between items-center gap-4">
+                <div className="border-t border-cyber-cyan/15 pt-4 mt-2 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                   <p className="text-[10px] font-mono text-gray-500 uppercase leading-snug">
-                    ⚡ ALL METRICS ARE FINAL ON SUBMISSION.
+                    ⚡ ALL METRICS ARE FINAL UPON SUBMISSION. SCORES ENCRYPTED TO NEON DB.
                   </p>
                   <CyberButton
                     variant="cyan"
                     size="md"
                     onClick={handleFinalSubmit}
-                    disabled={actionLoading || !judgingOpen}
-                    className="flex items-center gap-1.5 shrink-0"
+                    disabled={isSubmittingCurrentTeam || !judgingOpen}
+                    className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-center"
                   >
-                    <ShieldCheck className="w-4 h-4" /> {actionLoading ? "SUBMITTING..." : "SUBMIT EVALUATION"}
+                    {isSubmittingCurrentTeam ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" /> SUBMITTING EVALUATION...
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-4 h-4" /> SUBMIT EVALUATION
+                      </>
+                    )}
                   </CyberButton>
                 </div>
               )}
@@ -530,10 +771,15 @@ export default function JudgeDashboardPage() {
             <div className="cyber-glass border border-cyber-cyan/15 p-12 text-center flex flex-col items-center justify-center gap-4">
               <AlertTriangle className="w-8 h-8 text-cyber-yellow animate-pulse" />
               <p className="font-orbitron text-sm text-gray-400 uppercase tracking-widest">
-                NO TEAM DATA REGISTERED
+                NO TEAM DATA REGISTERED FOR THIS EVENT
               </p>
             </div>
           )}
+
+          {/* Compliance Rules Panel visible on mobile at bottom */}
+          <div className="block lg:hidden">
+            <RulesPanel />
+          </div>
         </section>
 
       </main>

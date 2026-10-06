@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { KeyRound, User, Radio, Cpu, BadgeCheck, Briefcase } from "lucide-react";
-import { getJudges, addJudge, initDatabase, verifyUserLogin } from "@/lib/db";
+import { KeyRound, User, Radio, Cpu, BadgeCheck, Briefcase, Layers } from "lucide-react";
+import { getJudges, addJudge, initDatabase, verifyUserLogin, getEvents } from "@/lib/db";
+import { EventItem } from "@/lib/types";
 import CyberInput from "@/components/CyberInput";
 import CyberButton from "@/components/CyberButton";
 
@@ -14,6 +15,10 @@ export default function JudgeAuthPage() {
   const [error, setError] = useState("");
   const [booting, setBooting] = useState(true);
 
+  // Events State
+  const [events, setEvents] = useState<EventItem[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState<string>("default_event");
+
   // Form states
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -22,7 +27,14 @@ export default function JudgeAuthPage() {
 
   useEffect(() => {
     initDatabase();
-    const timer = setTimeout(() => setBooting(false), 800);
+    getEvents().then((evList) => {
+      if (evList && evList.length > 0) {
+        setEvents(evList);
+        setSelectedEventId(evList[0].id);
+      }
+    }).catch(console.error);
+
+    const timer = setTimeout(() => setBooting(false), 600);
     return () => clearTimeout(timer);
   }, []);
 
@@ -56,6 +68,7 @@ export default function JudgeAuthPage() {
           username: matched.username,
           name: matched.name,
           designation: matched.designation,
+          eventId: matched.eventId || selectedEventId || "default_event",
         }));
         router.push("/dashboard");
 
@@ -71,7 +84,8 @@ export default function JudgeAuthPage() {
           name: fullName.trim(),
           designation: designation.trim(),
           password,
-        });
+          eventId: selectedEventId,
+        }, selectedEventId);
 
         if (!res.success || !res.data) {
           setError(res.error || "REGISTRATION FAILED.");
@@ -85,6 +99,7 @@ export default function JudgeAuthPage() {
           username: newJudge.username,
           name: newJudge.name,
           designation: newJudge.designation,
+          eventId: newJudge.eventId || selectedEventId || "default_event",
         }));
         router.push("/dashboard");
       }
@@ -105,7 +120,7 @@ export default function JudgeAuthPage() {
             <span className="font-orbitron font-bold tracking-widest text-sm">SCORESPHERE_INITIALIZE</span>
           </div>
           <p className="text-xs">⚡ SECURE CONNECTION PROTOCOL LOADED...</p>
-          <p className="text-xs">⚡ SYNCING STORAGE NODES...</p>
+          <p className="text-xs">⚡ SYNCING MULTI-EVENT STORAGE NODES...</p>
           <p className="text-xs">⚡ MOUNTING CRYO-DB ENGINES...</p>
           <div className="w-full bg-gray-950 h-1.5 mt-4 relative overflow-hidden border border-cyber-cyan/25">
             <div className="bg-cyber-cyan h-full absolute left-0 top-0 w-2/3 animate-pulse" />
@@ -115,6 +130,8 @@ export default function JudgeAuthPage() {
     );
   }
 
+  const activeEvent = events.find((e) => e.id === selectedEventId) || events[0];
+
   return (
     <div className="min-h-screen flex flex-col justify-center items-center p-4 relative overflow-hidden">
       {/* Background neon blobs */}
@@ -122,26 +139,34 @@ export default function JudgeAuthPage() {
       <div className="absolute w-[300px] h-[300px] bg-cyber-magenta/5 rounded-full blur-[100px] bottom-[15%] right-[20%] pointer-events-none" />
 
       {/* Main Terminal Frame */}
-      <div className="w-full max-w-md cyber-glass p-8 border border-cyber-cyan/25 relative flex flex-col gap-6 z-10">
+      <div className="w-full max-w-md cyber-glass p-6 sm:p-8 border border-cyber-cyan/25 relative flex flex-col gap-6 z-10">
         {/* Corner accents */}
         <span className="absolute top-0 left-0 w-2 h-2 bg-cyber-cyan" />
         <span className="absolute bottom-0 right-0 w-2 h-2 bg-cyber-cyan" />
         <span className="absolute top-0 right-0 w-2 h-2 bg-cyber-cyan/30" />
         <span className="absolute bottom-0 left-0 w-2 h-2 bg-cyber-cyan/30" />
 
-        {/* Portal Header */}
+        {/* Portal Header with Branding */}
         <div className="flex flex-col gap-1 text-center border-b border-cyber-cyan/15 pb-4">
           <div className="flex justify-center items-center gap-2 mb-1.5">
-            <Radio className="w-5 h-5 text-cyber-cyan animate-pulse" />
+            <Radio className="w-4 h-4 text-cyber-cyan animate-pulse" />
             <span className="font-mono text-xs text-cyber-cyan/80 tracking-widest font-bold uppercase">
-              SCORESPHERE HACKATHON
+              {activeEvent?.name || "SCORESPHERE HACKATHON"}
             </span>
           </div>
-          <h1 className="font-orbitron font-extrabold text-2xl text-white tracking-widest text-glow-cyan">
+
+          {activeEvent?.logo && (
+            <div className="flex justify-center my-1">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={activeEvent.logo} alt="" className="h-8 max-w-[130px] object-contain" />
+            </div>
+          )}
+
+          <h1 className="font-orbitron font-extrabold text-xl sm:text-2xl text-white tracking-widest text-glow-cyan">
             JURY PORTAL
           </h1>
           <p className="font-sans text-[10px] text-gray-500 tracking-wider uppercase mt-1">
-            BMS Institute of Technology &amp; Management, Bengaluru
+            {activeEvent?.subtitle || activeEvent?.organizer || "BMS Institute of Technology & Management, Bengaluru"}
           </p>
         </div>
 
@@ -173,6 +198,31 @@ export default function JudgeAuthPage() {
 
         {/* Auth Form */}
         <form onSubmit={handleAuth} className="flex flex-col gap-4">
+
+          {/* Event Picker on Register */}
+          {!isLogin && events.length > 1 && (
+            <div className="flex flex-col gap-1 w-full">
+              <label htmlFor="auth-event-select" className="font-orbitron text-xs font-semibold tracking-widest uppercase text-cyber-cyan text-glow-cyan">
+                ASSIGN EVALUATION EVENT
+              </label>
+              <div className="flex items-center gap-2 bg-cyber-bg-darker/80 border border-gray-800 px-3 py-2 text-xs font-mono">
+                <Layers className="w-4 h-4 text-cyber-cyan shrink-0" />
+                <select
+                  id="auth-event-select"
+                  aria-label="Assign Evaluation Event"
+                  value={selectedEventId}
+                  onChange={(e) => setSelectedEventId(e.target.value)}
+                  className="bg-transparent text-white outline-none w-full cursor-pointer"
+                >
+                  {events.map((ev) => (
+                    <option key={ev.id} value={ev.id} className="bg-gray-900 text-white">
+                      {ev.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
 
           {/* Register-only fields */}
           {!isLogin && (
@@ -251,10 +301,6 @@ export default function JudgeAuthPage() {
           </div>
         </form>
       </div>
-
-      <footer className="mt-8 text-center text-[10px] text-gray-600 font-mono uppercase tracking-widest relative z-10">
-        SYSTEM SHIELD AUDIT ACTIVE • BMSIT&M © 2026
-      </footer>
     </div>
   );
 }
