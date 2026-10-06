@@ -34,6 +34,8 @@ async function migrateEvents() {
   await sql`ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "status" TEXT NOT NULL DEFAULT 'active';`;
   await sql`ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "resultsDeclared" BOOLEAN NOT NULL DEFAULT false;`;
   await sql`ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "declaredAt" TIMESTAMP WITHOUT TIME ZONE;`;
+  await sql`ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "resultsPublished" BOOLEAN NOT NULL DEFAULT false;`;
+  await sql`ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "resultsPublishedAt" TIMESTAMP WITHOUT TIME ZONE;`;
   console.log("✅ Table 'Event' columns verified/created.");
 
   // 2. Add eventId column to Team, Criteria, Score, User
@@ -41,7 +43,8 @@ async function migrateEvents() {
   await sql`ALTER TABLE "Criteria" ADD COLUMN IF NOT EXISTS "eventId" TEXT NOT NULL DEFAULT 'default_event';`;
   await sql`ALTER TABLE "Score" ADD COLUMN IF NOT EXISTS "eventId" TEXT NOT NULL DEFAULT 'default_event';`;
   await sql`ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "eventId" TEXT NOT NULL DEFAULT 'default_event';`;
-  console.log("✅ 'eventId' column added to Team, Criteria, Score, User.");
+  await sql`ALTER TABLE "AuditLog" ADD COLUMN IF NOT EXISTS "eventId" TEXT;`;
+  console.log("✅ 'eventId' column added to Team, Criteria, Score, User, AuditLog.");
 
   // 3. Insert or update default generic event
   await sql`

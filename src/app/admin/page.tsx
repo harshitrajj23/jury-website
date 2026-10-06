@@ -39,6 +39,7 @@ import {
   getEvents,
   createEvent,
   updateEvent,
+  deleteEvent,
   declareResults,
   revokeResultsDeclaration
 } from "@/lib/db";
@@ -98,6 +99,9 @@ export default function AdminConsolePage() {
   // Event Modals state
   const [isEditEventModalOpen, setIsEditEventModalOpen] = useState(false);
   const [isCreateEventModalOpen, setIsCreateEventModalOpen] = useState(false);
+  const [isDeleteEventModalOpen, setIsDeleteEventModalOpen] = useState(false);
+  const [eventToDelete, setEventToDelete] = useState<EventItem | null>(null);
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState("");
 
   // Result Declaration state
   const [isDeclareResultsModalOpen, setIsDeclareResultsModalOpen] = useState(false);
@@ -476,6 +480,55 @@ export default function AdminConsolePage() {
       await fetchDbData(selectedEventId, false);
     } catch (err: any) {
       alert(`FAIL: ERROR REVOKING DECLARATION: ${err?.message || "Database error"}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleConfirmDeleteEvent = async () => {
+    if (!eventToDelete) return;
+    if (deleteConfirmInput.trim() !== eventToDelete.name.trim()) {
+      alert(`VALIDATION FAILED: Please type the exact event name "${eventToDelete.name}" to confirm deletion.`);
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      const res = await deleteEvent(eventToDelete.id);
+      if (!res.success) {
+        alert(`FAIL: EVENT DELETION FAILED.\n\n${res.error}`);
+        return;
+      }
+
+      alert(`✅ EVENT "${eventToDelete.name}" PERMANENTLY DELETED.`);
+      setIsDeleteEventModalOpen(false);
+      const deletedId = eventToDelete.id;
+      setEventToDelete(null);
+      setDeleteConfirmInput("");
+
+      // Refresh events list
+      const freshEvents = await getEvents();
+      setEvents(freshEvents);
+
+      // If the currently viewed event was deleted, safely select another available event
+      if (selectedEventId === deletedId) {
+        const remaining = freshEvents.filter((e) => e.id !== deletedId);
+        if (remaining.length > 0) {
+          handleEventSwitch(remaining[0].id);
+        } else {
+          setSelectedEventId("");
+          setCurrentEvent(null);
+          setTeams([]);
+          setJudges([]);
+          setScores([]);
+          setCriteria([]);
+          setLeaderboard([]);
+        }
+      } else {
+        await fetchDbData(selectedEventId, false);
+      }
+    } catch (err: any) {
+      alert(`FAIL: ERROR DELETING EVENT: ${err?.message || "Database error"}`);
     } finally {
       setActionLoading(false);
     }
@@ -887,55 +940,78 @@ export default function AdminConsolePage() {
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {events.map((ev) => {
-                  const isCurrent = ev.id === selectedEventId;
-                  return (
-                    <div 
-                      key={ev.id}
-                      className={`p-4 border transition-all flex flex-col justify-between gap-3 ${
-                        isCurrent 
-                          ? "border-cyber-magenta bg-cyber-magenta/10 shadow-[0_0_15px_rgba(217,70,239,0.15)]" 
-                          : "border-gray-800 bg-cyber-bg-darker/60 hover:border-gray-700"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap mb-1">
-                            {ev.logo ? (
-                              /* eslint-disable-next-line @next/next/no-img-element */
-                              <img src={ev.logo} alt="" className="h-5 max-w-[80px] object-contain" />
-                            ) : null}
-                            {ev.organizerLogo ? (
-                              /* eslint-disable-next-line @next/next/no-img-element */
-                              <img src={ev.organizerLogo} alt="" className="h-5 max-w-[80px] object-contain" />
-                            ) : null}
+              {events.length === 0 ? (
+                <div className="p-8 text-center border border-dashed border-gray-800 flex flex-col items-center gap-3">
+                  <Layers className="w-8 h-8 text-gray-600" />
+                  <p className="font-mono text-sm text-gray-400">No events created yet.</p>
+                  <CyberButton
+                    variant="cyan"
+                    size="sm"
+                    onClick={() => setIsCreateEventModalOpen(true)}
+                    className="flex items-center gap-1.5"
+                  >
+                    <PlusCircle className="w-3.5 h-3.5" /> CREATE EVENT
+                  </CyberButton>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {events.map((ev) => {
+                    const isCurrent = ev.id === selectedEventId;
+                    return (
+                      <div 
+                        key={ev.id}
+                        className={`p-4 border transition-all flex flex-col justify-between gap-3 ${
+                          isCurrent 
+                            ? "border-cyber-magenta bg-cyber-magenta/10 shadow-[0_0_15px_rgba(217,70,239,0.15)]" 
+                            : "border-gray-800 bg-cyber-bg-darker/60 hover:border-gray-700"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap mb-1">
+                              {ev.logo ? (
+                                /* eslint-disable-next-line @next/next/no-img-element */
+                                <img src={ev.logo} alt="" className="h-5 max-w-[80px] object-contain" />
+                              ) : null}
+                              {ev.organizerLogo ? (
+                                /* eslint-disable-next-line @next/next/no-img-element */
+                                <img src={ev.organizerLogo} alt="" className="h-5 max-w-[80px] object-contain" />
+                              ) : null}
+                            </div>
+                            <h4 className="font-orbitron font-bold text-white text-sm uppercase truncate">
+                              {ev.name}
+                            </h4>
+                            {ev.organizer && <p className="text-xs text-cyber-cyan font-mono mt-0.5">{ev.organizer}</p>}
+                            {ev.subtitle && <p className="text-[11px] text-gray-400 font-mono mt-0.5 line-clamp-1">{ev.subtitle}</p>}
+                            <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-500 font-mono flex-wrap">
+                              <span>ID: {ev.id}</span>
+                              {ev.date && (
+                                <>
+                                  <span>•</span>
+                                  <span className="text-gray-400">{ev.date}</span>
+                                </>
+                              )}
+                            </div>
                           </div>
-                          <h4 className="font-orbitron font-bold text-white text-sm uppercase truncate">
-                            {ev.name}
-                          </h4>
-                          {ev.organizer && <p className="text-xs text-cyber-cyan font-mono mt-0.5">{ev.organizer}</p>}
-                          {ev.subtitle && <p className="text-[11px] text-gray-400 font-mono mt-0.5 line-clamp-1">{ev.subtitle}</p>}
-                          <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-500 font-mono flex-wrap">
-                            <span>ID: {ev.id}</span>
-                            {ev.date && (
-                              <>
-                                <span>•</span>
-                                <span className="text-gray-400">{ev.date}</span>
-                              </>
-                            )}
-                          </div>
+
+                          {isCurrent && (
+                            <span className="text-[9px] font-mono text-cyber-green bg-cyber-green/10 border border-cyber-green/30 px-2 py-0.5 font-bold uppercase shrink-0">
+                              ACTIVE
+                            </span>
+                          )}
                         </div>
 
-                        {isCurrent && (
-                          <span className="text-[9px] font-mono text-cyber-green bg-cyber-green/10 border border-cyber-green/30 px-2 py-0.5 font-bold uppercase shrink-0">
-                            ACTIVE
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex justify-end gap-2 border-t border-white/5 pt-2">
-                        {isCurrent ? (
+                        <div className="flex justify-end gap-2 border-t border-white/5 pt-2 flex-wrap">
+                          {!isCurrent && (
+                            <CyberButton
+                              variant="cyan"
+                              size="sm"
+                              onClick={() => handleEventSwitch(ev.id)}
+                              disabled={actionLoading}
+                            >
+                              SWITCH
+                            </CyberButton>
+                          )}
                           <CyberButton
                             variant="magenta"
                             size="sm"
@@ -949,24 +1025,28 @@ export default function AdminConsolePage() {
                               setEditEventStatus(ev.status || "active");
                               setIsEditEventModalOpen(true);
                             }}
-                          >
-                            <Edit3 className="w-3.5 h-3.5" /> EDIT EVENT
-                          </CyberButton>
-                        ) : (
-                          <CyberButton
-                            variant="cyan"
-                            size="sm"
-                            onClick={() => handleEventSwitch(ev.id)}
                             disabled={actionLoading}
                           >
-                            SWITCH
+                            <Edit3 className="w-3.5 h-3.5" /> EDIT
                           </CyberButton>
-                        )}
+                          <CyberButton
+                            variant="red"
+                            size="sm"
+                            onClick={() => {
+                              setEventToDelete(ev);
+                              setDeleteConfirmInput("");
+                              setIsDeleteEventModalOpen(true);
+                            }}
+                            disabled={actionLoading}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" /> DELETE
+                          </CyberButton>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* EDIT EVENT MODAL DIALOG */}
@@ -1178,6 +1258,108 @@ export default function AdminConsolePage() {
                       </CyberButton>
                     </div>
                   </form>
+                </div>
+              </div>
+            )}
+
+            {/* DELETE EVENT CONFIRMATION DIALOG MODAL (Requirement 1, 2, 24) */}
+            {isDeleteEventModalOpen && eventToDelete && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
+                <div className="w-full max-w-lg bg-cyber-bg-dark border border-cyber-red p-6 shadow-[0_0_35px_rgba(239,68,68,0.25)] flex flex-col gap-4">
+                  <div className="flex items-center justify-between border-b border-cyber-red/30 pb-3">
+                    <div className="flex items-center gap-2">
+                      <Trash2 className="w-5 h-5 text-cyber-red" />
+                      <h3 className="font-orbitron text-base font-bold text-white uppercase tracking-wider">
+                        DELETE EVENT?
+                      </h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsDeleteEventModalOpen(false);
+                        setEventToDelete(null);
+                        setDeleteConfirmInput("");
+                      }}
+                      className="text-gray-400 hover:text-white transition-colors"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col gap-3 font-mono text-xs text-gray-300">
+                    <div className="p-3 bg-cyber-bg-darker border border-cyber-red/30 flex flex-col gap-1">
+                      <div className="text-white font-orbitron font-bold text-sm uppercase">{eventToDelete.name}</div>
+                      {eventToDelete.organizer && (
+                        <div className="text-cyber-cyan text-[11px]">Organized by {eventToDelete.organizer}</div>
+                      )}
+                      <div className="text-gray-500 text-[10px]">ID: {eventToDelete.id}</div>
+                    </div>
+
+                    {Boolean(eventToDelete.resultsDeclared) && (
+                      <div className="p-3 bg-cyber-red/15 border border-cyber-red text-cyber-red font-bold flex flex-col gap-1">
+                        <span className="flex items-center gap-1.5 uppercase font-orbitron text-xs">
+                          ⚠️ THIS EVENT HAS PUBLISHED RESULTS.
+                        </span>
+                        <span className="text-[11px] font-mono font-normal text-gray-300">
+                          Deleting will permanently destroy public championship records, podium entries, and finalized rankings.
+                        </span>
+                      </div>
+                    )}
+
+                    <p className="text-gray-300 font-semibold">This will permanently remove:</p>
+                    <ul className="list-disc pl-5 space-y-1 text-gray-300">
+                      <li>Event</li>
+                      <li>Assigned judges</li>
+                      <li>Teams</li>
+                      <li>Criteria</li>
+                      <li>Scores</li>
+                      <li>Event settings</li>
+                      <li>Event results</li>
+                      <li>Event-specific audit data where applicable</li>
+                    </ul>
+
+                    <p className="text-cyber-red font-bold mt-1">This action cannot be undone.</p>
+
+                    <div className="flex flex-col gap-1.5 mt-2">
+                      <label className="text-gray-300 text-[11px] uppercase tracking-wider">
+                        Type the event name to confirm: <span className="text-white font-bold select-all">"{eventToDelete.name}"</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={deleteConfirmInput}
+                        onChange={(e) => setDeleteConfirmInput(e.target.value)}
+                        placeholder={eventToDelete.name}
+                        disabled={actionLoading}
+                        className="bg-cyber-bg-darker border border-cyber-red/50 focus:border-cyber-red px-3 py-2 text-white font-mono text-sm outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-3 border-t border-cyber-red/20 pt-4 mt-2">
+                    <CyberButton
+                      type="button"
+                      variant="cyan"
+                      size="md"
+                      onClick={() => {
+                        setIsDeleteEventModalOpen(false);
+                        setEventToDelete(null);
+                        setDeleteConfirmInput("");
+                      }}
+                      disabled={actionLoading}
+                    >
+                      CANCEL
+                    </CyberButton>
+                    <CyberButton
+                      type="button"
+                      variant="red"
+                      size="md"
+                      onClick={handleConfirmDeleteEvent}
+                      disabled={deleteConfirmInput.trim() !== eventToDelete.name.trim() || actionLoading}
+                      className="flex items-center gap-2"
+                    >
+                      <Trash2 className="w-4 h-4" /> {actionLoading ? "DELETING..." : "DELETE EVENT"}
+                    </CyberButton>
+                  </div>
                 </div>
               </div>
             )}

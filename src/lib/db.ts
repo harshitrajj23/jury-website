@@ -399,6 +399,54 @@ export async function updateEvent(eventId: string, updates: Partial<EventItem>):
   }
 }
 
+/**
+ * Permanently deletes an event and all event-owned records in a dependency-safe atomic transaction.
+ * Strictly scoped by eventId: Score, Criteria, Team, non-admin User, AuditLog, Event.
+ */
+export async function deleteEvent(eventId: string): Promise<ActionResult> {
+  try {
+    const sql = getDb();
+    if (!eventId || eventId === "all") {
+      return { success: false, error: "VALIDATION_ERROR: Missing or invalid event identifier." };
+    }
+
+    // Verify event exists
+    const evRows = await sql`
+      SELECT id, name, "resultsDeclared" 
+      FROM "Event" 
+      WHERE id = ${eventId} 
+      LIMIT 1;
+    `;
+    if (!evRows || evRows.length === 0) {
+      return { success: false, error: "Event not found." };
+    }
+    const ev = evRows[0];
+
+    // Atomically delete all event-scoped data in dependency-safe order
+    await (sql as any).transaction((tx: any) => [
+      tx`DELETE FROM "Score" WHERE "eventId" = ${eventId};`,
+      tx`DELETE FROM "Criteria" WHERE "eventId" = ${eventId};`,
+      tx`DELETE FROM "Team" WHERE "eventId" = ${eventId};`,
+      tx`DELETE FROM "User" WHERE "eventId" = ${eventId} AND role != 'admin';`,
+      tx`DELETE FROM "AuditLog" WHERE "eventId" = ${eventId};`,
+      tx`DELETE FROM "Event" WHERE id = ${eventId};`,
+    ]);
+
+    await logAudit("DELETE_EVENT", `Permanently deleted event "${ev.name}" (${eventId}) and all dependent records`);
+    await broadcastRealtimeEvent({ 
+      table: "Event", 
+      action: "DELETE_EVENT", 
+      eventId, 
+      data: { deletedEventId: eventId } 
+    });
+
+    return { success: true };
+  } catch (err: any) {
+    console.error("Neon DB Error (deleteEvent):", err);
+    return { success: false, error: err?.message || "Failed to delete event." };
+  }
+}
+
 // ==============================================================
 // JUDGES / USERS
 // ==============================================================
