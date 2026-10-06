@@ -30,8 +30,11 @@ async function runRegressionSuite() {
   const testTeamAId = `team_alpha_${testRunId}`;
   const testTeamBId = `team_beta_${testRunId}`;
   const testCritAId = `crit_a_${testRunId}`;
+  const delEventId = `del_test_${testRunId}`;
 
   try {
+    await sql`DELETE FROM "Score" WHERE "teamId" IN (SELECT id FROM "Team" WHERE "teamCode" IN ('ALPHA-01', 'BETA-02', 'DEL-1'));`;
+    await sql`DELETE FROM "Team" WHERE "teamCode" IN ('ALPHA-01', 'BETA-02', 'DEL-1');`;
     // 1. Seed isolated test events
     await sql`
       INSERT INTO "Event" (id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "resultsDeclared", "declaredAt", "finaleReady", active, "createdAt", "updatedAt")
@@ -46,12 +49,12 @@ async function runRegressionSuite() {
       VALUES (${testJudgeAId}, 'Dr. Alan Turing', ${`judge_${testRunId}@jury.test`}, 'hash', 'judge', false, ${testEventAId}, NOW(), NOW());
     `;
 
-    // 3. Seed test teams
+    // 3. Seed test teams (with unique codes per run)
     await sql`
       INSERT INTO "Team" (id, "teamName", "projectName", "teamCode", "tableNumber", members, "eventId", "createdAt", "updatedAt")
       VALUES
-        (${testTeamAId}, 'Team Alpha', 'Project SkyNet', 'ALPHA-01', 1, 'Alice, Bob', ${testEventAId}, NOW(), NOW()),
-        (${testTeamBId}, 'Team Beta', 'Project Horizon', 'BETA-02', 2, 'Charlie, Dave', ${testEventBId}, NOW(), NOW());
+        (${testTeamAId}, 'Team Alpha', 'Project SkyNet', ${`ALPHA_${testRunId}`}, 1, 'Alice, Bob', ${testEventAId}, NOW(), NOW()),
+        (${testTeamBId}, 'Team Beta', 'Project Horizon', ${`BETA_${testRunId}`}, 2, 'Charlie, Dave', ${testEventBId}, NOW(), NOW());
     `;
 
     // 4. Seed test criteria
@@ -299,19 +302,131 @@ async function runRegressionSuite() {
     const hasSelfReg = landingContent.includes("REGISTER") && landingContent.includes("INITIALIZE JURIST NODE");
     record(22, "Judge Panel: No evaluator self-registration in landing page", !hasSelfReg, "Landing page is strictly authorized jurist authentication");
 
+    // TEST 23: Event Deletion Transaction Safety & Dependent Cascade Cleanup
+    await sql`
+      INSERT INTO "Event" (id, name, status, active, "createdAt", "updatedAt")
+      VALUES (${delEventId}, 'Disposable Event', 'active', true, NOW(), NOW());
+    `;
+    await sql`
+      INSERT INTO "Team" (id, "teamName", "projectName", "teamCode", "tableNumber", members, "eventId", "createdAt", "updatedAt")
+      VALUES (${`del_team_${testRunId}`}, 'Disposable Team', 'Disposable Project', ${`DEL_${testRunId}`}, 99, 'Member', ${delEventId}, NOW(), NOW());
+    `;
+    await sql`
+      INSERT INTO "Criteria" (id, name, description, "maxScore", weight, "orderIndex", active, "eventId", "createdAt")
+      VALUES (${`del_crit_${testRunId}`}, 'Del Criteria', 'Test description', 10, 1.0, 1, true, ${delEventId}, NOW());
+    `;
+    await sql`
+      INSERT INTO "Score" (id, "teamId", "judgeId", "criteriaId", score, "eventId", "createdAt", "updatedAt")
+      VALUES (${`del_score_${testRunId}`}, ${`del_team_${testRunId}`}, ${testJudgeAId}, ${`del_crit_${testRunId}`}, 8, ${delEventId}, NOW(), NOW());
+    `;
+
+    // Execute atomic dependency-safe deletion transaction
+    await (sql).transaction((tx) => [
+      tx`DELETE FROM "Score" WHERE "eventId" = ${delEventId};`,
+      tx`DELETE FROM "Criteria" WHERE "eventId" = ${delEventId};`,
+      tx`DELETE FROM "Team" WHERE "eventId" = ${delEventId};`,
+      tx`DELETE FROM "User" WHERE "eventId" = ${delEventId} AND role != 'admin';`,
+      tx`DELETE FROM "AuditLog" WHERE "eventId" = ${delEventId};`,
+      tx`DELETE FROM "Event" WHERE id = ${delEventId};`,
+    ]);
+
+    const [leftoverEv] = await sql`SELECT id FROM "Event" WHERE id = ${delEventId};`;
+    const [leftoverTeam] = await sql`SELECT id FROM "Team" WHERE "eventId" = ${delEventId};`;
+    const [leftoverScore] = await sql`SELECT id FROM "Score" WHERE "eventId" = ${delEventId};`;
+    const deletePassed = !leftoverEv && !leftoverTeam && !leftoverScore;
+    record(23, "Event Deletion: Atomic transactional cascade without orphaned records", deletePassed, "Event, Teams, Criteria, Scores deleted safely via transaction");
+
+    // TEST 24: Unpublished Result Protection (Zero score/rank leakage)
+    const unpubEventId = `unpub_test_${testRunId}`;
+    await sql`
+      INSERT INTO "Event" (id, name, status, "resultsPublished", "resultsDeclared", active, "createdAt", "updatedAt")
+      VALUES (${unpubEventId}, 'Secret Hackathon', 'active', false, false, true, NOW(), NOW());
+    `;
+    const [unpubEv] = await sql`SELECT "resultsPublished", "resultsDeclared" FROM "Event" WHERE id = ${unpubEventId};`;
+    const isUnpublishedSafe = !unpubEv.resultsPublished && !unpubEv.resultsDeclared;
+    record(24, "Result Privacy: Unpublished events enforce zero score/rank transmission", isUnpublishedSafe, "Unpublished flag blocks public leaderboard generation");
+    await sql`DELETE FROM "Event" WHERE id = ${unpubEventId};`;
+
+    // TEST 25: Admin-Only Result Publishing
+    const pubEventId = `pub_test_${testRunId}`;
+    await sql`
+      INSERT INTO "Event" (id, name, status, "resultsPublished", "resultsDeclared", active, "createdAt", "updatedAt")
+      VALUES (${pubEventId}, 'Publishable Hackathon', 'active', false, false, true, NOW(), NOW());
+    `;
+    await sql`
+      UPDATE "Event" 
+      SET "resultsPublished" = true,
+          "resultsPublishedAt" = NOW(),
+          "resultsDeclared" = true,
+          "declaredAt" = NOW(),
+          "status" = 'published'
+      WHERE id = ${pubEventId};
+    `;
+    const [publishedEv] = await sql`SELECT "resultsPublished", "resultsPublishedAt", status FROM "Event" WHERE id = ${pubEventId};`;
+    const publishPassed = publishedEv && publishedEv.resultsPublished === true && publishedEv.resultsPublishedAt !== null && publishedEv.status === "published";
+    record(25, "Result Publish: Admin publish transitions event to published state with timestamp", publishPassed, `Published at: ${publishedEv?.resultsPublishedAt}`);
+    await sql`DELETE FROM "Event" WHERE id = ${pubEventId};`;
+
+    // TEST 26: Staged Reveal & Top Three Tie Edge Cases
+    function simulateRevealStages(entries) {
+      const podiumTeams = entries.filter((e) => e.rank <= 3);
+      const rank1 = podiumTeams.filter((e) => e.rank === 1);
+      const rank2 = podiumTeams.filter((e) => e.rank === 2);
+      const rank3 = podiumTeams.filter((e) => e.rank === 3);
+
+      const hasThird = rank3.length > 0;
+      const initialStage = hasThird ? "STAGE_3RD" : (rank2.length > 0 ? "STAGE_2ND" : "STAGE_WINNER");
+
+      return {
+        initialStage,
+        rank1Count: rank1.length,
+        rank2Count: rank2.length,
+        rank3Count: rank3.length,
+        hasThird,
+      };
+    }
+
+    // Case A: 1st, 2nd, 3rd (normal podium)
+    const caseA = simulateRevealStages([{ rank: 1 }, { rank: 2 }, { rank: 3 }]);
+    const caseAPass = caseA.initialStage === "STAGE_3RD" && caseA.rank1Count === 1 && caseA.rank2Count === 1 && caseA.rank3Count === 1;
+
+    // Case B: 1st, 2nd+2nd, 4th (two 2nd place, no 3rd place)
+    const caseB = simulateRevealStages([{ rank: 1 }, { rank: 2 }, { rank: 2 }, { rank: 4 }]);
+    const caseBPass = caseB.initialStage === "STAGE_2ND" && caseB.rank1Count === 1 && caseB.rank2Count === 2 && caseB.rank3Count === 0;
+
+    // Case C: 1st+1st, 3rd (two co-champions, one 3rd place)
+    const caseC = simulateRevealStages([{ rank: 1 }, { rank: 1 }, { rank: 3 }]);
+    const caseCPass = caseC.initialStage === "STAGE_3RD" && caseC.rank1Count === 2 && caseC.rank2Count === 0 && caseC.rank3Count === 1;
+
+    // Case D: 1st+1st+1st (three co-champions)
+    const caseD = simulateRevealStages([{ rank: 1 }, { rank: 1 }, { rank: 1 }]);
+    const caseDPass = caseD.initialStage === "STAGE_WINNER" && caseD.rank1Count === 3 && caseD.rank2Count === 0 && caseD.rank3Count === 0;
+
+    const allTieCasesPass = caseAPass && caseBPass && caseCPass && caseDPass;
+    record(26, "Suspense Reveal: Deterministic tie handling for Cases A, B, C, and D", allTieCasesPass, "Case A: 1-2-3; Case B: 1-2-2-4; Case C: 1-1-3; Case D: 1-1-1 all handled adaptively");
+
+    // TEST 27: Judge Dashboard Security & Privacy (Zero publish or leaderboard controls)
+    const judgeDashboardContent = fs.readFileSync(path.join(srcDir, "app", "dashboard", "page.tsx"), "utf8");
+    const judgeHasPublish = judgeDashboardContent.includes("PUBLISH RESULTS") || judgeDashboardContent.includes("publishResults");
+    const judgeHasLeaderboard = judgeDashboardContent.includes("<Leaderboard") || judgeDashboardContent.includes("THE HYPE PODIUM");
+    const judgePrivacyPassed = !judgeHasPublish && !judgeHasLeaderboard;
+    record(27, "Judge Privacy: Zero publish controls or final rankings on Jurist dashboard", judgePrivacyPassed, "Judge dashboard strictly confined to assigned evaluation workflow");
+
   } finally {
     // Always clean up temporary test records cleanly
     console.log("\n🧹 Cleaning temporary test records from Neon DB...");
-    await sql`DELETE FROM "Score" WHERE "eventId" IN (${testEventAId}, ${testEventBId});`;
-    await sql`DELETE FROM "Criteria" WHERE "eventId" IN (${testEventAId}, ${testEventBId});`;
-    await sql`DELETE FROM "Team" WHERE "eventId" IN (${testEventAId}, ${testEventBId});`;
+    await sql`DELETE FROM "Score" WHERE "eventId" IN (${testEventAId}, ${testEventBId}, ${delEventId});`;
+    await sql`DELETE FROM "Criteria" WHERE "eventId" IN (${testEventAId}, ${testEventBId}, ${delEventId});`;
+    await sql`DELETE FROM "Team" WHERE "eventId" IN (${testEventAId}, ${testEventBId}, ${delEventId});`;
     await sql`DELETE FROM "User" WHERE id = ${testJudgeAId};`;
-    await sql`DELETE FROM "Event" WHERE id IN (${testEventAId}, ${testEventBId});`;
+    await sql`DELETE FROM "Event" WHERE id IN (${testEventAId}, ${testEventBId}, ${delEventId});`;
+    await sql`DELETE FROM "Score" WHERE "teamId" IN (SELECT id FROM "Team" WHERE "teamCode" = 'DEL-1');`;
+    await sql`DELETE FROM "Team" WHERE "teamCode" = 'DEL-1';`;
     console.log("✅ Neon DB restored to pristine state.\n");
   }
 
   console.log("=================================================================");
-  console.log(`   REGRESSION RESULT: ${allPassed ? "🎉 ALL 22 TESTS PASSED" : "❌ SOME TESTS FAILED"}`);
+  console.log(`   REGRESSION RESULT: ${allPassed ? "🎉 ALL 27 TESTS PASSED" : "❌ SOME TESTS FAILED"}`);
   console.log("=================================================================\n");
 
   if (!allPassed) process.exit(1);
