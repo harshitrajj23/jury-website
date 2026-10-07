@@ -57,6 +57,7 @@ export interface EventItem {
   organizer?: string;
   logo?: string;
   organizerLogo?: string;
+  banner?: string;
   date?: string;
   theme?: string;
   status?: string;

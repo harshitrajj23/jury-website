@@ -36,6 +36,7 @@ async function migrateEvents() {
   await sql`ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "declaredAt" TIMESTAMP WITHOUT TIME ZONE;`;
   await sql`ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "resultsPublished" BOOLEAN NOT NULL DEFAULT false;`;
   await sql`ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "resultsPublishedAt" TIMESTAMP WITHOUT TIME ZONE;`;
+  await sql`ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "banner" TEXT NOT NULL DEFAULT '';`;
   console.log("✅ Table 'Event' columns verified/created.");
 
   // 2. Add eventId column to Team, Criteria, Score, User

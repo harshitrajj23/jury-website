@@ -419,6 +419,14 @@ export default function JudgeDashboardPage() {
 
   return (
     <div className="min-h-screen flex flex-col relative pb-12 overflow-x-hidden">
+      {/* Ambient Event Banner Glow */}
+      {currentEvent?.banner && (
+        <div
+          className="fixed inset-0 bg-cover bg-center opacity-5 filter blur-sm pointer-events-none z-0"
+          style={{ backgroundImage: `url(${currentEvent.banner})` }}
+        />
+      )}
+
       {/* Dynamic Header */}
       <header className="border-b border-cyber-cyan/15 bg-cyber-bg-darker/95 backdrop-blur-md sticky top-0 z-40">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
@@ -508,6 +516,36 @@ export default function JudgeDashboardPage() {
           </div>
         </div>
       </header>
+
+      {/* Event Banner Hero (when uploaded by organizer) */}
+      {currentEvent?.banner && (
+        <div className="relative w-full h-28 sm:h-36 md:h-44 overflow-hidden border-b border-cyber-cyan/25 shadow-[0_0_25px_rgba(6,182,212,0.12)]">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={currentEvent.banner}
+            alt={`${currentEvent.name} Banner`}
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-cyber-bg via-cyber-bg/50 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-r from-cyber-bg/80 via-transparent to-cyber-bg/80" />
+
+          <div className="absolute bottom-3 left-0 right-0 max-w-6xl mx-auto px-4 sm:px-6 flex items-end justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <span className="font-mono text-[9px] uppercase tracking-widest text-cyber-cyan bg-black/75 px-2 py-0.5 border border-cyber-cyan/40 font-bold">
+                OFFICIAL EVENT
+              </span>
+              <span className="font-orbitron font-bold text-white text-sm sm:text-base tracking-wider uppercase drop-shadow">
+                {currentEvent.name}
+              </span>
+            </div>
+            {currentEvent.organizer && (
+              <span className="hidden sm:inline-block font-mono text-[10px] text-gray-300 bg-black/75 backdrop-blur px-2.5 py-0.5 border border-white/20 uppercase font-semibold">
+                {currentEvent.organizer}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Floating Feedback Banner */}
       {feedback && (

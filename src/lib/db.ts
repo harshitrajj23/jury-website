@@ -36,6 +36,7 @@ export async function initDatabase(): Promise<ActionResult> {
         ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "date" TEXT NOT NULL DEFAULT '';
         ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "theme" TEXT NOT NULL DEFAULT '';
         ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "status" TEXT NOT NULL DEFAULT 'active';
+        ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "banner" TEXT NOT NULL DEFAULT '';
       `;
       // Clean up legacy organization-specific hardcoded default branding
       await sql`
@@ -59,6 +60,7 @@ export async function initDatabase(): Promise<ActionResult> {
         organizer TEXT NOT NULL DEFAULT '',
         logo TEXT NOT NULL DEFAULT '',
         "organizerLogo" TEXT NOT NULL DEFAULT '',
+        banner TEXT NOT NULL DEFAULT '',
         date TEXT NOT NULL DEFAULT '',
         theme TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'active',
@@ -194,7 +196,7 @@ export async function getEvents(): Promise<EventItem[]> {
   try {
     const sql = getDb();
     const rows = await sql`
-      SELECT id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", "resultsDeclared", "declaredAt", "resultsPublished", "resultsPublishedAt", active, "createdAt", "updatedAt"
+      SELECT id, name, subtitle, organizer, logo, "organizerLogo", banner, date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", "resultsDeclared", "declaredAt", "resultsPublished", "resultsPublishedAt", active, "createdAt", "updatedAt"
       FROM "Event"
       WHERE active = true
       ORDER BY "createdAt" ASC;
@@ -207,6 +209,7 @@ export async function getEvents(): Promise<EventItem[]> {
       organizer: e.organizer || "",
       logo: e.logo || "",
       organizerLogo: e.organizerLogo || "",
+      banner: e.banner || "",
       date: e.date || "",
       theme: e.theme || "",
       status: e.status || "active",
@@ -232,6 +235,7 @@ export async function getEvents(): Promise<EventItem[]> {
         organizer: "Computer Science Club",
         logo: "",
         organizerLogo: "",
+        banner: "",
         date: "",
         theme: "",
         status: "active",
@@ -249,7 +253,7 @@ export async function getEvent(eventId: string = "default_event"): Promise<Event
   try {
     const sql = getDb();
     const rows = await sql`
-      SELECT id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", "resultsDeclared", "declaredAt", "resultsPublished", "resultsPublishedAt", active
+      SELECT id, name, subtitle, organizer, logo, "organizerLogo", banner, date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", "resultsDeclared", "declaredAt", "resultsPublished", "resultsPublishedAt", active
       FROM "Event"
       WHERE id = ${eventId}
       LIMIT 1;
@@ -263,6 +267,7 @@ export async function getEvent(eventId: string = "default_event"): Promise<Event
       organizer: e.organizer || "",
       logo: e.logo || "",
       organizerLogo: e.organizerLogo || "",
+      banner: e.banner || "",
       date: e.date || "",
       theme: e.theme || "",
       status: e.status || "active",
@@ -291,14 +296,15 @@ export async function createEvent(eventData: Partial<EventItem>): Promise<Action
     const organizer = (eventData.organizer || "").trim();
     const logo = (eventData.logo || "").trim();
     const organizerLogo = (eventData.organizerLogo || "").trim();
+    const banner = (eventData.banner || "").trim();
     const date = (eventData.date || "").trim();
     const theme = (eventData.theme || "").trim();
     const status = (eventData.status || "active").trim();
     const timerDuration = Math.max(60, Math.min(3600, eventData.timerDuration || 300));
 
     await sql`
-      INSERT INTO "Event" (id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active, "createdAt", "updatedAt")
-      VALUES (${id}, ${name}, ${subtitle}, ${organizer}, ${logo}, ${organizerLogo}, ${date}, ${theme}, ${status}, ${timerDuration}, true, false, false, true, NOW(), NOW())
+      INSERT INTO "Event" (id, name, subtitle, organizer, logo, "organizerLogo", banner, date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active, "createdAt", "updatedAt")
+      VALUES (${id}, ${name}, ${subtitle}, ${organizer}, ${logo}, ${organizerLogo}, ${banner}, ${date}, ${theme}, ${status}, ${timerDuration}, true, false, false, true, NOW(), NOW())
     `;
 
     // Clone base criteria for this event if template criteria exist
@@ -325,6 +331,7 @@ export async function createEvent(eventData: Partial<EventItem>): Promise<Action
       organizer,
       logo,
       organizerLogo,
+      banner,
       date,
       theme,
       status,
@@ -355,6 +362,7 @@ export async function updateEvent(eventId: string, updates: Partial<EventItem>):
     const organizer = updates.organizer !== undefined ? updates.organizer.trim() : existing.organizer;
     const logo = updates.logo !== undefined ? updates.logo.trim() : existing.logo;
     const organizerLogo = updates.organizerLogo !== undefined ? updates.organizerLogo.trim() : (existing.organizerLogo || "");
+    const banner = updates.banner !== undefined ? updates.banner.trim() : (existing.banner || "");
     const date = updates.date !== undefined ? updates.date.trim() : (existing.date || "");
     const theme = updates.theme !== undefined ? updates.theme.trim() : (existing.theme || "");
     const status = updates.status !== undefined ? updates.status.trim() : (existing.status || "active");
@@ -369,6 +377,7 @@ export async function updateEvent(eventId: string, updates: Partial<EventItem>):
           organizer = ${organizer},
           logo = ${logo},
           "organizerLogo" = ${organizerLogo},
+          banner = ${banner},
           date = ${date},
           theme = ${theme},
           status = ${status},
@@ -386,6 +395,7 @@ export async function updateEvent(eventId: string, updates: Partial<EventItem>):
       organizer,
       logo,
       organizerLogo,
+      banner,
       date,
       theme,
       status,
@@ -679,7 +689,7 @@ export async function getConfig(eventId: string = "default_event"): Promise<AppC
 
     // Query event-specific settings and criteria strictly scoped to eventId
     const [eventRows, settingsRows] = await Promise.all([
-      sql`SELECT id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", "resultsDeclared", "declaredAt", "resultsPublished", "resultsPublishedAt" FROM "Event" WHERE id = ${eventId} LIMIT 1;`,
+      sql`SELECT id, name, subtitle, organizer, logo, "organizerLogo", banner, date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", "resultsDeclared", "declaredAt", "resultsPublished", "resultsPublishedAt" FROM "Event" WHERE id = ${eventId} LIMIT 1;`,
       sql`SELECT "leaderboardUnlocked", "judgingOpen", "finaleReady", "timerDuration" FROM "Settings" WHERE id = 'global' LIMIT 1;`,
     ]);
 
@@ -729,6 +739,7 @@ export async function getConfig(eventId: string = "default_event"): Promise<AppC
       organizer: ev.organizer || "",
       logo: ev.logo || "",
       organizerLogo: ev.organizerLogo || "",
+      banner: ev.banner || "",
       date: ev.date || "",
       theme: ev.theme || "",
       status: ev.status || "active",
@@ -980,6 +991,7 @@ export async function getPublicResults(eventId: string = "default_event"): Promi
           organizer: ev.organizer,
           logo: ev.logo,
           organizerLogo: ev.organizerLogo,
+          banner: ev.banner,
           date: ev.date,
           theme: ev.theme,
           status: ev.status,

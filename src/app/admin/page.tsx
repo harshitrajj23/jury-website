@@ -48,6 +48,7 @@ import { Judge, Team, ScoringCriteria, ScoreRecord, LeaderboardEntry, EventItem 
 import { useRealtimeSync } from "@/lib/useRealtimeSync";
 import CyberButton from "@/components/CyberButton";
 import CyberInput from "@/components/CyberInput";
+import ImageUpload from "@/components/ImageUpload";
 
 export default function AdminConsolePage() {
   // Authentication & Security
@@ -86,6 +87,7 @@ export default function AdminConsolePage() {
   const [newEventOrganizer, setNewEventOrganizer] = useState("");
   const [newEventLogo, setNewEventLogo] = useState("");
   const [newEventOrgLogo, setNewEventOrgLogo] = useState("");
+  const [newEventBanner, setNewEventBanner] = useState("");
   const [newEventDate, setNewEventDate] = useState("");
 
   // Selected Event Editing state
@@ -94,6 +96,7 @@ export default function AdminConsolePage() {
   const [editEventOrganizer, setEditEventOrganizer] = useState("");
   const [editEventLogo, setEditEventLogo] = useState("");
   const [editEventOrgLogo, setEditEventOrgLogo] = useState("");
+  const [editEventBanner, setEditEventBanner] = useState("");
   const [editEventDate, setEditEventDate] = useState("");
   const [editEventStatus, setEditEventStatus] = useState("active");
 
@@ -128,6 +131,7 @@ export default function AdminConsolePage() {
       setEditEventOrganizer(currentEvent.organizer || "");
       setEditEventLogo(currentEvent.logo || "");
       setEditEventOrgLogo(currentEvent.organizerLogo || "");
+      setEditEventBanner(currentEvent.banner || "");
       setEditEventDate(currentEvent.date || "");
       setEditEventStatus(currentEvent.status || "active");
     }
@@ -240,6 +244,7 @@ export default function AdminConsolePage() {
         organizer: newEventOrganizer.trim(),
         logo: newEventLogo.trim(),
         organizerLogo: newEventOrgLogo.trim(),
+        banner: newEventBanner.trim(),
         date: newEventDate.trim(),
         status: "active",
       });
@@ -254,6 +259,7 @@ export default function AdminConsolePage() {
       setNewEventOrganizer("");
       setNewEventLogo("");
       setNewEventOrgLogo("");
+      setNewEventBanner("");
       setNewEventDate("");
       setIsCreateEventModalOpen(false);
       alert(`✅ EVENT "${res.data.name}" CREATED SUCCESSFULLY.`);
@@ -277,6 +283,7 @@ export default function AdminConsolePage() {
         organizer: editEventOrganizer.trim(),
         logo: editEventLogo.trim(),
         organizerLogo: editEventOrgLogo.trim(),
+        banner: editEventBanner.trim(),
         date: editEventDate.trim(),
         status: editEventStatus.trim() || "active",
       });
@@ -867,6 +874,7 @@ export default function AdminConsolePage() {
                         setEditEventOrganizer(currentEvent.organizer || "");
                         setEditEventLogo(currentEvent.logo || "");
                         setEditEventOrgLogo(currentEvent.organizerLogo || "");
+                        setEditEventBanner(currentEvent.banner || "");
                         setEditEventDate(currentEvent.date || "");
                         setEditEventStatus(currentEvent.status || "active");
                       }
@@ -889,14 +897,22 @@ export default function AdminConsolePage() {
               </div>
 
               {/* Current Active Event Banner */}
-              <div className="bg-cyber-bg-darker/70 border border-cyber-magenta/40 p-4 rounded-none flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-4 min-w-0">
-                  <div className="w-12 h-12 border border-cyber-magenta/50 bg-black/40 flex items-center justify-center shrink-0">
+              <div className="relative overflow-hidden bg-cyber-bg-darker/80 border border-cyber-magenta/40 p-5 rounded-none flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-[0_0_25px_rgba(217,70,239,0.1)]">
+                {currentEvent?.banner && (
+                  <div 
+                    className="absolute inset-0 bg-cover bg-center opacity-30 filter blur-[0.5px] pointer-events-none"
+                    style={{ backgroundImage: `url(${currentEvent.banner})` }}
+                  />
+                )}
+                <div className="absolute inset-0 bg-gradient-to-r from-cyber-bg-darker via-cyber-bg-darker/90 to-transparent pointer-events-none" />
+
+                <div className="relative z-10 flex items-center gap-4 min-w-0">
+                  <div className="w-14 h-14 border border-cyber-magenta/50 bg-black/60 flex items-center justify-center shrink-0 overflow-hidden shadow-inner">
                     {currentEvent?.logo ? (
                       /* eslint-disable-next-line @next/next/no-img-element */
                       <img src={currentEvent.logo} alt="" className="max-w-full max-h-full object-contain p-1" />
                     ) : (
-                      <Layers className="w-6 h-6 text-cyber-magenta" />
+                      <Layers className="w-7 h-7 text-cyber-magenta" />
                     )}
                   </div>
                   <div className="min-w-0">
@@ -907,8 +923,13 @@ export default function AdminConsolePage() {
                       <span className="text-[10px] font-mono text-gray-400">
                         ID: {selectedEventId}
                       </span>
+                      {currentEvent?.banner && (
+                        <span className="text-[9px] font-mono uppercase px-1.5 py-0.2 bg-cyber-cyan/20 border border-cyber-cyan/40 text-cyber-cyan font-bold">
+                          🖼️ BANNER ATTACHED
+                        </span>
+                      )}
                     </div>
-                    <h3 className="font-orbitron text-lg font-bold text-white uppercase tracking-wider mt-1 truncate">
+                    <h3 className="font-orbitron text-lg sm:text-xl font-bold text-white uppercase tracking-wider mt-1 truncate">
                       {currentEvent?.name || selectedEventId}
                     </h3>
                     <div className="flex items-center gap-3 text-xs text-gray-400 font-mono mt-0.5 flex-wrap">
@@ -925,7 +946,7 @@ export default function AdminConsolePage() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                <div className="relative z-10 flex items-center gap-2 self-end sm:self-center shrink-0">
                   <span className="text-xs font-mono px-2.5 py-1 bg-cyber-green/15 text-cyber-green border border-cyber-green/30 font-bold uppercase tracking-widest">
                     ACTIVE
                   </span>
@@ -977,6 +998,17 @@ export default function AdminConsolePage() {
                             : "border-gray-800 bg-cyber-bg-darker/60 hover:border-gray-700"
                         }`}
                       >
+                        {ev.banner && (
+                          <div className="relative w-full h-14 overflow-hidden border border-cyber-cyan/30 mb-1 rounded-none">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={ev.banner} alt="" className="w-full h-full object-cover" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent pointer-events-none" />
+                            <span className="absolute bottom-1 right-1 text-[8px] font-mono bg-black/80 px-1 text-cyber-cyan border border-cyber-cyan/30 font-bold uppercase">
+                              BANNER
+                            </span>
+                          </div>
+                        )}
+
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -1032,6 +1064,7 @@ export default function AdminConsolePage() {
                               setEditEventOrganizer(ev.organizer || "");
                               setEditEventLogo(ev.logo || "");
                               setEditEventOrgLogo(ev.organizerLogo || "");
+                              setEditEventBanner(ev.banner || "");
                               setEditEventDate(ev.date || "");
                               setEditEventStatus(ev.status || "active");
                               setIsEditEventModalOpen(true);
@@ -1116,22 +1149,39 @@ export default function AdminConsolePage() {
                         onChange={(e) => setEditEventDate(e.target.value)}
                         disabled={actionLoading}
                       />
-                      <CyberInput
-                        variant="magenta"
-                        label="EVENT LOGO (URL OR PATH)"
-                        placeholder="e.g. /logos/event-logo.svg or https://..."
-                        value={editEventLogo}
-                        onChange={(e) => setEditEventLogo(e.target.value)}
-                        disabled={actionLoading}
-                      />
-                      <CyberInput
-                        variant="magenta"
-                        label="ORGANIZER LOGO (URL OR PATH)"
-                        placeholder="e.g. /logos/club-logo.svg or https://..."
-                        value={editEventOrgLogo}
-                        onChange={(e) => setEditEventOrgLogo(e.target.value)}
-                        disabled={actionLoading}
-                      />
+                      <div className="sm:col-span-1">
+                        <ImageUpload
+                          label="EVENT LOGO"
+                          value={editEventLogo}
+                          onChange={setEditEventLogo}
+                          aspect="logo"
+                          themeColor="magenta"
+                          helperText="Official competition / hackathon logo"
+                          disabled={actionLoading}
+                        />
+                      </div>
+                      <div className="sm:col-span-1">
+                        <ImageUpload
+                          label="ORGANIZER LOGO"
+                          value={editEventOrgLogo}
+                          onChange={setEditEventOrgLogo}
+                          aspect="logo"
+                          themeColor="magenta"
+                          helperText="Club, department, or society logo"
+                          disabled={actionLoading}
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <ImageUpload
+                          label="EVENT BANNER / COVER IMAGE"
+                          value={editEventBanner}
+                          onChange={setEditEventBanner}
+                          aspect="banner"
+                          themeColor="magenta"
+                          helperText="Wide hero backdrop displayed across Results & Admin dashboards"
+                          disabled={actionLoading}
+                        />
+                      </div>
                       <div className="sm:col-span-2">
                         <label className="block text-[11px] font-mono tracking-wider text-gray-400 uppercase mb-1">
                           EVENT STATUS
@@ -1230,22 +1280,39 @@ export default function AdminConsolePage() {
                         onChange={(e) => setNewEventDate(e.target.value)}
                         disabled={actionLoading}
                       />
-                      <CyberInput
-                        variant="cyan"
-                        label="EVENT LOGO (URL / PATH)"
-                        placeholder="e.g. /logos/event-logo.svg"
-                        value={newEventLogo}
-                        onChange={(e) => setNewEventLogo(e.target.value)}
-                        disabled={actionLoading}
-                      />
-                      <CyberInput
-                        variant="cyan"
-                        label="ORGANIZER LOGO (URL / PATH)"
-                        placeholder="e.g. /logos/organizer-logo.svg"
-                        value={newEventOrgLogo}
-                        onChange={(e) => setNewEventOrgLogo(e.target.value)}
-                        disabled={actionLoading}
-                      />
+                      <div className="sm:col-span-1">
+                        <ImageUpload
+                          label="EVENT LOGO"
+                          value={newEventLogo}
+                          onChange={setNewEventLogo}
+                          aspect="logo"
+                          themeColor="cyan"
+                          helperText="Official competition / hackathon logo"
+                          disabled={actionLoading}
+                        />
+                      </div>
+                      <div className="sm:col-span-1">
+                        <ImageUpload
+                          label="ORGANIZER LOGO"
+                          value={newEventOrgLogo}
+                          onChange={setNewEventOrgLogo}
+                          aspect="logo"
+                          themeColor="cyan"
+                          helperText="Club, department, or society logo"
+                          disabled={actionLoading}
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <ImageUpload
+                          label="EVENT BANNER / COVER IMAGE"
+                          value={newEventBanner}
+                          onChange={setNewEventBanner}
+                          aspect="banner"
+                          themeColor="cyan"
+                          helperText="Wide hero backdrop displayed across Results & Admin dashboards"
+                          disabled={actionLoading}
+                        />
+                      </div>
                     </div>
 
                     <div className="flex items-center justify-end gap-3 border-t border-cyber-cyan/20 pt-4 mt-2">

@@ -3,7 +3,8 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { KeyRound, User, Radio, Cpu, BadgeCheck } from "lucide-react";
-import { initDatabase, verifyUserLogin } from "@/lib/db";
+import { initDatabase, verifyUserLogin, getEvents } from "@/lib/db";
+import { EventItem } from "@/lib/types";
 import CyberInput from "@/components/CyberInput";
 import CyberButton from "@/components/CyberButton";
 
@@ -12,6 +13,7 @@ export default function JudgeAuthPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [booting, setBooting] = useState(true);
+  const [activeEvent, setActiveEvent] = useState<EventItem | null>(null);
 
   // Form states
   const [username, setUsername] = useState("");
@@ -19,6 +21,11 @@ export default function JudgeAuthPage() {
 
   useEffect(() => {
     initDatabase();
+    getEvents().then((evs) => {
+      if (evs && evs.length > 0) {
+        setActiveEvent(evs[0]);
+      }
+    }).catch(() => {});
     const timer = setTimeout(() => setBooting(false), 500);
     return () => clearTimeout(timer);
   }, []);
@@ -74,12 +81,18 @@ export default function JudgeAuthPage() {
 
   return (
     <div className="min-h-screen flex flex-col justify-center items-center p-4 relative overflow-hidden">
-      {/* Background neon blobs */}
+      {/* Background neon blobs & Ambient Banner */}
       <div className="absolute w-[300px] h-[300px] bg-cyber-cyan/5 rounded-full blur-[100px] top-[10%] left-[20%] pointer-events-none" />
       <div className="absolute w-[300px] h-[300px] bg-cyber-magenta/5 rounded-full blur-[100px] bottom-[15%] right-[20%] pointer-events-none" />
+      {activeEvent?.banner && (
+        <div
+          className="absolute inset-0 bg-cover bg-center opacity-10 filter blur-[2px] pointer-events-none"
+          style={{ backgroundImage: `url(${activeEvent.banner})` }}
+        />
+      )}
 
       {/* Main Terminal Frame */}
-      <div className="w-full max-w-md cyber-glass p-6 sm:p-8 border border-cyber-cyan/25 relative flex flex-col gap-6 z-10">
+      <div className="w-full max-w-md cyber-glass p-6 sm:p-8 border border-cyber-cyan/25 relative flex flex-col gap-6 z-10 shadow-[0_0_40px_rgba(6,182,212,0.1)]">
         {/* Corner accents */}
         <span className="absolute top-0 left-0 w-2 h-2 bg-cyber-cyan" />
         <span className="absolute bottom-0 right-0 w-2 h-2 bg-cyber-cyan" />
@@ -96,17 +109,29 @@ export default function JudgeAuthPage() {
           </div>
 
           <div className="flex justify-center items-center gap-3 my-1">
-            <div className="p-2.5 bg-cyber-cyan/10 border border-cyber-cyan/30 text-cyber-cyan shadow-[0_0_12px_rgba(0,240,255,0.2)]">
-              <BadgeCheck className="w-6 h-6 animate-pulse" />
-            </div>
+            {activeEvent?.logo ? (
+              <div className="p-2 bg-black/60 border border-cyber-cyan/40 shadow-[0_0_15px_rgba(0,240,255,0.2)] max-w-[140px] max-h-16 flex items-center justify-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={activeEvent.logo}
+                  alt={activeEvent.name || "Event Logo"}
+                  className="max-h-12 max-w-full object-contain"
+                  onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                />
+              </div>
+            ) : (
+              <div className="p-2.5 bg-cyber-cyan/10 border border-cyber-cyan/30 text-cyber-cyan shadow-[0_0_12px_rgba(0,240,255,0.2)]">
+                <BadgeCheck className="w-6 h-6 animate-pulse" />
+              </div>
+            )}
           </div>
 
-          <h1 className="font-orbitron font-extrabold text-xl sm:text-2xl text-white tracking-widest text-glow-cyan">
-            JURY PORTAL
+          <h1 className="font-orbitron font-extrabold text-xl sm:text-2xl text-white tracking-widest text-glow-cyan uppercase">
+            {activeEvent?.name ? activeEvent.name : "JURY PORTAL"}
           </h1>
 
           <p className="font-sans text-[11px] text-gray-400 tracking-wider uppercase">
-            Authorized Evaluator Terminal • Multi-Event Platform
+            {activeEvent?.organizer ? `Organized by ${activeEvent.organizer}` : "Authorized Evaluator Terminal • Multi-Event Platform"}
           </p>
         </div>
 

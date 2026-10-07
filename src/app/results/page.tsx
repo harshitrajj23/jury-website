@@ -126,6 +126,12 @@ function LeaderboardContent() {
     return (
       <div className="min-h-screen flex flex-col justify-center items-center p-4 relative font-mono overflow-x-hidden">
         <div className="absolute w-[300px] h-[300px] bg-cyber-red/5 rounded-full blur-[100px] top-[20%] left-[30%] pointer-events-none" />
+        {currentEvent?.banner && (
+          <div 
+            className="absolute inset-0 bg-cover bg-center opacity-15 filter blur-[2px] pointer-events-none"
+            style={{ backgroundImage: `url(${currentEvent.banner})` }}
+          />
+        )}
         
         <div className="w-full max-w-lg cyber-glass border border-cyber-red/30 p-8 relative flex flex-col items-center text-center gap-6 shadow-[0_0_40px_rgba(239,68,68,0.15)]">
           <span className="absolute top-0 left-0 w-2.5 h-2.5 bg-cyber-red" />
@@ -290,6 +296,46 @@ function LeaderboardContent() {
           </div>
         </div>
       </header>
+
+      {/* Event Banner Hero (when uploaded by organizer) */}
+      {currentEvent?.banner && (
+        <div className="relative w-full h-44 sm:h-56 md:h-64 overflow-hidden border-b border-cyber-cyan/30 shadow-[0_0_35px_rgba(6,182,212,0.15)]">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={currentEvent.banner}
+            alt={`${currentEvent.name} Banner`}
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-cyber-bg via-cyber-bg/40 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-r from-cyber-bg/80 via-transparent to-cyber-bg/80" />
+
+          <div className="absolute bottom-4 left-0 right-0 max-w-5xl mx-auto px-4 sm:px-6 flex items-end justify-between gap-4">
+            <div className="flex items-center gap-3">
+              {currentEvent?.logo && (
+                <div className="p-1.5 bg-black/75 backdrop-blur-md border border-cyber-cyan/50 shadow-lg">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={currentEvent.logo} alt="" className="h-10 sm:h-12 max-w-[120px] object-contain" />
+                </div>
+              )}
+              <div className="text-left">
+                <h2 className="font-orbitron font-extrabold text-lg sm:text-2xl text-white uppercase text-glow-cyan drop-shadow-md">
+                  {currentEvent.name}
+                </h2>
+                {currentEvent.subtitle && (
+                  <p className="font-mono text-xs text-cyber-cyan/90 drop-shadow">
+                    {currentEvent.subtitle}
+                  </p>
+                )}
+              </div>
+            </div>
+            {currentEvent.organizer && (
+              <span className="hidden sm:inline-block font-mono text-[10px] text-gray-300 bg-black/70 backdrop-blur px-3 py-1 border border-white/20 uppercase font-semibold">
+                Organized by {currentEvent.organizer}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Main Content: Suspense Reveal or Full Rankings */}
       <main className="max-w-4xl mx-auto px-4 sm:px-6 w-full mt-8 flex-grow flex flex-col gap-6">
