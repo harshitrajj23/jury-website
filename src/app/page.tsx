@@ -49,6 +49,7 @@ export default function JudgeAuthPage() {
         username: matched.username,
         name: matched.name,
         designation: matched.designation,
+        role: matched.role || "judge",
         eventId: matched.eventId || "default_event",
       }));
       router.push("/dashboard");

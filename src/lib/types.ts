@@ -121,3 +121,15 @@ export interface AuditLogEntry {
   createdAt: string;
   eventId?: string;
 }
+
+export interface JudgePortalData {
+  authorizedEvents: EventItem[];
+  selectedEventId: string;
+  currentEvent: EventItem | null;
+  teams: Team[];
+  judgeScores: ScoreRecord[];
+  criteriaList: ScoringCriteria[];
+  judgingOpen: boolean;
+  announceResults: boolean;
+}
+

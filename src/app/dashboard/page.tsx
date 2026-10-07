@@ -16,7 +16,9 @@ import {
   Search,
   ArrowLeft,
   X,
-  Award
+  Award,
+  Building2,
+  Calendar
 } from "lucide-react";
 import { 
   getTeams, 
@@ -24,7 +26,8 @@ import {
   getConfig, 
   submitScores, 
   initDatabase,
-  getEvents
+  getEvents,
+  getJudgePortalData
 } from "@/lib/db";
 import { Team, ScoringCriteria, ScoreRecord, Judge, EventItem } from "@/lib/types";
 import { useRealtimeSync } from "@/lib/useRealtimeSync";
@@ -88,23 +91,35 @@ export default function JudgeDashboardPage() {
       setLoading(true);
     }
     try {
-      const [eventsList, allTeams, judgeScores, config] = await Promise.all([
-        getEvents(),
-        getTeams(eventId),
-        getJudgeScores(judgeId, eventId),
-        getConfig(eventId),
-      ]);
-      
-      setEvents(eventsList || []);
-      const matchedEv = eventsList.find((e) => e.id === eventId) || config.event || null;
-      setCurrentEvent(matchedEv);
+      const portalRes = await getJudgePortalData(judgeId, eventId);
+      if (!portalRes.success || !portalRes.data) {
+        showFeedback("error", portalRes.error || "TRANSMISSION_ERROR: Could not load judge portal data.");
+        setLoading(false);
+        return;
+      }
+
+      const {
+        authorizedEvents,
+        selectedEventId: effectiveEventId,
+        currentEvent: assignedEvent,
+        teams: allTeams,
+        judgeScores,
+        criteriaList,
+        judgingOpen: isJudgingOpen,
+        announceResults: isAnnounceResults,
+      } = portalRes.data;
+
+      setEvents(authorizedEvents || []);
+      setCurrentEvent(assignedEvent);
+      setSelectedEventId(effectiveEventId);
+      currentEventIdRef.current = effectiveEventId;
 
       setTeams(allTeams || []);
       setScores(judgeScores || []);
-      setCriteria(config?.criteriaList || []);
-      setAnnounceResults(Boolean(config?.announceResults));
-      setJudgingOpen(config?.judgingOpen !== false);
-      
+      setCriteria(criteriaList || []);
+      setAnnounceResults(isAnnounceResults);
+      setJudgingOpen(isJudgingOpen);
+
       // If a team is actively open and still exists in this event, keep it synced;
       // otherwise maintain selectedTeam as null so judge remains on search screen
       if (selectedTeamRef.current) {
@@ -204,6 +219,8 @@ export default function JudgeDashboardPage() {
     currentEventIdRef.current = newEvId;
     setSelectedTeam(null);
     setInputErrors({});
+    setSearchQuery(""); // Clear search state when switching events
+    setStatusFilter("all");
     if (judge) {
       fetchData(judge.id, newEvId, false);
     }
@@ -427,73 +444,45 @@ export default function JudgeDashboardPage() {
         />
       )}
 
-      {/* Dynamic Header */}
+      {/* Dynamic Utility Header */}
       <header className="border-b border-cyber-cyan/15 bg-cyber-bg-darker/95 backdrop-blur-md sticky top-0 z-40">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex flex-row items-center justify-between gap-3">
           
-          {/* Left: Branding & Event Identity */}
-          <div className="flex items-center gap-3 min-w-0">
-            {/* Event Logo & Organizer Logo */}
-            <div className="flex items-center gap-2 shrink-0">
-              {currentEvent?.logo && (
-                <div className="p-1.5 bg-black/40 border border-cyber-cyan/30 flex items-center justify-center">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img 
-                    src={currentEvent.logo} 
-                    alt={currentEvent.name} 
-                    className="h-8 max-w-[110px] object-contain"
-                    onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
-                  />
-                </div>
-              )}
-
-              {currentEvent?.organizerLogo && (
-                <div className="p-1.5 bg-black/40 border border-gray-700 flex items-center justify-center">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img 
-                    src={currentEvent.organizerLogo} 
-                    alt={currentEvent.organizer || "Organizer"} 
-                    className="h-8 max-w-[110px] object-contain"
-                    onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
-                  />
-                </div>
-              )}
-
-              {!currentEvent?.logo && !currentEvent?.organizerLogo && (
-                <span className="p-2 bg-cyber-cyan/10 text-cyber-cyan border border-cyber-cyan/20 shrink-0">
-                  <Sparkles className="w-5 h-5 animate-pulse" />
+          {/* Left: Judge Session & Status Indicator */}
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${realtimeStatus === "connected" ? "bg-cyber-green animate-ping" : "bg-cyber-yellow"}`} />
+            <div className="min-w-0 flex items-center gap-2 flex-wrap">
+              <span className="font-orbitron font-bold text-xs sm:text-sm text-white tracking-wider uppercase truncate">
+                JURY EVALUATOR: {judge.name.toUpperCase()}
+              </span>
+              <span className="text-[10px] font-mono text-gray-500 hidden sm:inline">•</span>
+              <span className="font-mono text-[10px] text-cyber-cyan tracking-wider truncate">
+                [{completedCount}/{eventTeams.length} EVALUATED]
+              </span>
+              {realtimeStatus === "connected" && (
+                <span className="text-[9px] font-mono px-1.5 py-0.2 bg-cyber-green/10 border border-cyber-green/30 text-cyber-green uppercase font-semibold hidden md:inline">
+                  ⚡ LIVE SYNC
                 </span>
               )}
-            </div>
-            
-            <div className="min-w-0">
-              <h1 className="font-orbitron font-extrabold text-base sm:text-lg text-white tracking-widest text-glow-cyan uppercase truncate">
-                {currentEvent?.name || "EVALUATION DECK"}
-              </h1>
-              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${realtimeStatus === "connected" ? "bg-cyber-green animate-ping" : "bg-cyber-yellow"}`} />
-                <span className="font-mono text-[9px] text-cyber-cyan tracking-wider truncate">
-                  {realtimeStatus === "connected" ? "⚡ LIVE SYNC" : "OFFLINE / POLLING"} • JUDGE: {judge.name.toUpperCase()} • [{completedCount}/{eventTeams.length} EVALUATED]
-                  {currentEvent?.organizer ? ` • ${currentEvent.organizer}` : ""}
-                </span>
-              </div>
             </div>
           </div>
 
-          {/* Right: Event Info / Switcher & Logout */}
-          <div className="flex items-center gap-2.5 flex-wrap justify-between md:justify-end">
-            {/* Event Selector Dropdown (Only for admins) */}
-            {judge.role === "admin" && events.length > 1 && (
-              <div className="flex items-center gap-1.5 bg-cyber-bg-darker border border-cyber-cyan/25 px-2.5 py-1 text-xs font-mono">
+          {/* Right: Event Switcher / Event Badge & Disconnect */}
+          <div className="flex items-center gap-2.5 shrink-0">
+            {/* Event Selector: ONLY shown if judge is authorized for multiple events */}
+            {events.length > 1 ? (
+              <div className="flex items-center gap-1.5 bg-cyber-bg-darker border border-cyber-cyan/30 px-2.5 py-1 text-xs font-mono">
                 <Layers className="w-3.5 h-3.5 text-cyber-cyan shrink-0" />
-                <label htmlFor="dashboard-event-select" className="sr-only">Select Event</label>
+                <label htmlFor="dashboard-event-select" className="text-[10px] text-gray-400 font-bold uppercase hidden sm:inline">
+                  EVENT:
+                </label>
                 <select
                   id="dashboard-event-select"
                   aria-label="Select Evaluation Event"
                   value={selectedEventId}
                   onChange={(e) => handleEventChange(e.target.value)}
                   disabled={!!submittingTeamId}
-                  className="bg-transparent text-gray-200 outline-none cursor-pointer pr-1 text-xs"
+                  className="bg-transparent text-cyber-cyan font-bold outline-none cursor-pointer pr-1 text-xs max-w-[140px] sm:max-w-[200px] truncate"
                 >
                   {events.map((ev) => (
                     <option key={ev.id} value={ev.id} className="bg-gray-900 text-white">
@@ -502,6 +491,14 @@ export default function JudgeDashboardPage() {
                   ))}
                 </select>
               </div>
+            ) : (
+              /* Single Event Badge: Clean display without unnecessary dropdown */
+              <div className="hidden sm:flex items-center gap-1.5 bg-cyber-bg-darker/80 border border-gray-800 px-2.5 py-1 text-xs font-mono">
+                <span className="text-[9px] text-gray-500 uppercase font-bold">ASSIGNED:</span>
+                <span className="text-gray-200 font-bold truncate max-w-[170px]">
+                  {currentEvent?.name || selectedEventId}
+                </span>
+              </div>
             )}
 
             <CyberButton
@@ -509,43 +506,13 @@ export default function JudgeDashboardPage() {
               size="sm"
               onClick={handleLogout}
               disabled={!!submittingTeamId}
-              className="flex items-center gap-1.5 shrink-0"
+              className="flex items-center gap-1.5 shrink-0 text-xs"
             >
               <LogOut className="w-3.5 h-3.5" /> DISCONNECT
             </CyberButton>
           </div>
         </div>
       </header>
-
-      {/* Event Banner Hero (when uploaded by organizer) */}
-      {currentEvent?.banner && (
-        <div className="relative w-full h-28 sm:h-36 md:h-44 overflow-hidden border-b border-cyber-cyan/25 shadow-[0_0_25px_rgba(6,182,212,0.12)]">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={currentEvent.banner}
-            alt={`${currentEvent.name} Banner`}
-            className="w-full h-full object-cover"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-cyber-bg via-cyber-bg/50 to-transparent" />
-          <div className="absolute inset-0 bg-gradient-to-r from-cyber-bg/80 via-transparent to-cyber-bg/80" />
-
-          <div className="absolute bottom-3 left-0 right-0 max-w-6xl mx-auto px-4 sm:px-6 flex items-end justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <span className="font-mono text-[9px] uppercase tracking-widest text-cyber-cyan bg-black/75 px-2 py-0.5 border border-cyber-cyan/40 font-bold">
-                OFFICIAL EVENT
-              </span>
-              <span className="font-orbitron font-bold text-white text-sm sm:text-base tracking-wider uppercase drop-shadow">
-                {currentEvent.name}
-              </span>
-            </div>
-            {currentEvent.organizer && (
-              <span className="hidden sm:inline-block font-mono text-[10px] text-gray-300 bg-black/75 backdrop-blur px-2.5 py-0.5 border border-white/20 uppercase font-semibold">
-                {currentEvent.organizer}
-              </span>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Floating Feedback Banner */}
       {feedback && (
@@ -579,6 +546,104 @@ export default function JudgeDashboardPage() {
         {/* ============================================================== */}
         {!selectedTeam ? (
           <div className="flex flex-col gap-6 w-full">
+            {/* ============================================================== */}
+            {/* DEDICATED EVENT-SPECIFIC JUDGE PORTAL BRANDING BANNER          */}
+            {/* ============================================================== */}
+            <div className="w-full cyber-glass border border-cyber-cyan/35 p-5 sm:p-6 relative overflow-hidden shadow-[0_0_30px_rgba(6,182,212,0.12)]">
+              {currentEvent?.banner && (
+                <>
+                  <div
+                    className="absolute inset-0 bg-cover bg-center opacity-15 filter blur-[1px] pointer-events-none"
+                    style={{ backgroundImage: `url(${currentEvent.banner})` }}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-r from-cyber-bg-darker via-cyber-bg-darker/85 to-transparent pointer-events-none" />
+                </>
+              )}
+
+              {/* Cyberpunk Corner Markers */}
+              <span className="absolute top-0 left-0 w-2.5 h-2.5 bg-cyber-cyan" />
+              <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-cyber-cyan" />
+              <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-cyber-cyan/30" />
+              <span className="absolute bottom-0 left-0 w-2.5 h-2.5 bg-cyber-cyan/30" />
+
+              <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
+                {/* Left Side: Event Logo + Hierarchy (Name -> Organizer -> Subtitle/Date) */}
+                <div className="flex items-start sm:items-center gap-4 sm:gap-5 min-w-0 flex-grow">
+                  {/* 1. Event Logo or High-Fidelity Fallback */}
+                  <div className="shrink-0 mt-0.5 sm:mt-0">
+                    {currentEvent?.logo ? (
+                      <div className="w-14 h-14 sm:w-16 sm:h-16 p-1.5 bg-black/75 border border-cyber-cyan/50 flex items-center justify-center shadow-[0_0_15px_rgba(6,182,212,0.25)]">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={currentEvent.logo}
+                          alt={currentEvent.name}
+                          className="max-w-full max-h-full object-contain"
+                          onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                        />
+                      </div>
+                    ) : (
+                      <div className="w-14 h-14 sm:w-16 sm:h-16 bg-cyber-cyan/10 border border-cyber-cyan/40 flex items-center justify-center text-cyber-cyan shadow-[0_0_15px_rgba(6,182,212,0.2)]">
+                        <Award className="w-7 h-7 sm:w-8 sm:h-8 animate-pulse" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 2. Primary Event Typography Hierarchy */}
+                  <div className="min-w-0 flex flex-col gap-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[9px] font-mono uppercase px-2 py-0.5 bg-cyber-cyan/20 border border-cyber-cyan/40 text-cyber-cyan font-bold tracking-widest">
+                        EVALUATION EVENT
+                      </span>
+                      {currentEvent?.date && (
+                        <span className="text-[10px] font-mono text-gray-400 flex items-center gap-1">
+                          <Calendar className="w-3 h-3 text-cyber-cyan/70" />
+                          {currentEvent.date}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Event Name */}
+                    <h1 className="font-orbitron font-extrabold text-lg sm:text-2xl md:text-3xl text-white tracking-wider uppercase text-glow-cyan drop-shadow leading-tight break-words">
+                      {currentEvent?.name || selectedEventId}
+                    </h1>
+
+                    {/* Organizer / Club Name */}
+                    {currentEvent?.organizer && (
+                      <p className="font-mono text-xs sm:text-sm text-cyber-cyan font-semibold tracking-wide flex items-center gap-1.5">
+                        <Building2 className="w-3.5 h-3.5 text-cyber-cyan shrink-0" />
+                        {currentEvent.organizer}
+                      </p>
+                    )}
+
+                    {/* Subtitle / Description */}
+                    {currentEvent?.subtitle && (
+                      <p className="font-mono text-[11px] sm:text-xs text-gray-400 tracking-wide line-clamp-2">
+                        {currentEvent.subtitle}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Right Side: Organizer / Club Logo */}
+                {currentEvent?.organizerLogo && (
+                  <div className="shrink-0 self-end sm:self-center flex flex-col items-end gap-1">
+                    <span className="text-[8px] font-mono text-gray-400 uppercase tracking-widest hidden sm:block">
+                      ORGANIZER
+                    </span>
+                    <div className="p-1.5 bg-black/75 border border-gray-700/80 flex items-center justify-center max-w-[130px] max-h-14 sm:max-h-16 shadow-md">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={currentEvent.organizerLogo}
+                        alt={currentEvent.organizer || "Organizer"}
+                        className="max-w-full max-h-10 sm:max-h-12 object-contain"
+                        onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Search Header Card */}
             <div className="cyber-glass border border-cyber-cyan/30 p-5 sm:p-6 flex flex-col gap-4 shadow-[0_0_20px_rgba(6,182,212,0.06)]">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-cyber-cyan/15 pb-3">
@@ -783,20 +848,47 @@ export default function JudgeDashboardPage() {
           /* VIEW B: FOCUSED TEAM EVALUATION VIEW                           */
           /* ============================================================== */
           <div className="flex flex-col gap-5 w-full">
-            {/* Top Back Navigation Bar */}
-            <div className="flex items-center justify-between gap-3">
+            {/* Top Navigation & Compact Event Identity Bar */}
+            <div className="w-full bg-cyber-bg-darker/95 border border-cyber-cyan/30 p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-[0_0_15px_rgba(6,182,212,0.08)]">
               <button
                 type="button"
                 onClick={() => setSelectedTeam(null)}
                 disabled={isSubmittingCurrentTeam}
-                className="flex items-center gap-2 text-xs font-mono text-cyber-cyan hover:text-white transition-colors cursor-pointer border border-cyber-cyan/30 bg-cyber-bg-darker/80 px-3 py-2 disabled:opacity-50"
+                className="flex items-center gap-2 text-xs font-mono text-cyber-cyan hover:text-white transition-colors cursor-pointer border border-cyber-cyan/40 bg-black/50 px-3.5 py-2 disabled:opacity-50 shrink-0 w-fit"
               >
                 <ArrowLeft className="w-4 h-4" /> ← BACK TO TEAM SEARCH
               </button>
 
-              <span className="text-[10px] font-mono text-gray-400 uppercase tracking-widest hidden sm:inline">
-                EVENT: {currentEvent?.name || selectedEventId}
-              </span>
+              {/* Compact Event Identity in Evaluation Screen */}
+              <div className="flex items-center gap-3 min-w-0">
+                {currentEvent?.logo ? (
+                  <div className="w-9 h-9 p-1 bg-black/70 border border-cyber-cyan/40 shrink-0 flex items-center justify-center">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={currentEvent.logo} alt="" className="max-w-full max-h-full object-contain" />
+                  </div>
+                ) : (
+                  <div className="w-9 h-9 bg-cyber-cyan/10 border border-cyber-cyan/30 shrink-0 flex items-center justify-center text-cyber-cyan">
+                    <Award className="w-5 h-5" />
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <h2 className="font-orbitron font-bold text-xs sm:text-sm text-white uppercase tracking-wider truncate">
+                    {currentEvent?.name || selectedEventId}
+                  </h2>
+                  {currentEvent?.organizer && (
+                    <p className="font-mono text-[10px] sm:text-xs text-cyber-cyan font-semibold truncate flex items-center gap-1">
+                      <Building2 className="w-2.5 h-2.5 text-cyber-cyan" /> {currentEvent.organizer}
+                    </p>
+                  )}
+                </div>
+
+                {currentEvent?.organizerLogo && (
+                  <div className="shrink-0 p-1 bg-black/70 border border-gray-800 max-h-9 hidden md:flex items-center justify-center ml-2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={currentEvent.organizerLogo} alt="" className="max-h-7 max-w-[80px] object-contain" />
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Team Evaluation Container */}

@@ -1,7 +1,7 @@
 "use server";
 
 import bcrypt from "bcryptjs";
-import type { Judge, Team, ScoringCriteria, ScoreRecord, AppConfig, LeaderboardEntry, EventItem } from "./types";
+import type { Judge, Team, ScoringCriteria, ScoreRecord, AppConfig, LeaderboardEntry, EventItem, JudgePortalData } from "./types";
 import { getDb } from "./neonClient";
 import { broadcastRealtimeEvent } from "./redisClient";
 
@@ -565,6 +565,162 @@ export async function removeJudge(id: string): Promise<ActionResult> {
   } catch (err: any) {
     console.error("Neon DB Error (removeJudge):", err);
     return { success: false, error: err?.message || "Failed to remove judge." };
+  }
+}
+
+/**
+ * Resolves all events authorized for a specific judge.
+ * - Admin users have access to all active events.
+ * - Regular judges have access only to events they are assigned to in the database.
+ */
+export async function getJudgeAuthorizedEvents(judgeId: string): Promise<EventItem[]> {
+  try {
+    const sql = getDb();
+
+    // 1. Verify and lookup user
+    const userRows = await sql`
+      SELECT id, name, email, role, "eventId"
+      FROM "User"
+      WHERE id = ${judgeId} OR LOWER(email) = LOWER(${judgeId})
+      LIMIT 1;
+    `;
+
+    if (!userRows || userRows.length === 0) {
+      return [];
+    }
+
+    const user = userRows[0];
+
+    // Admin judges have global access across all active events
+    if (user.role === "admin") {
+      return await getEvents();
+    }
+
+    // 2. Collect assigned event IDs for this judge
+    const assignedRows = await sql`
+      SELECT DISTINCT "eventId"
+      FROM "User"
+      WHERE id = ${user.id} OR LOWER(email) = LOWER(${user.email});
+    `;
+
+    const eventIdSet = new Set<string>();
+    assignedRows.forEach((r: any) => {
+      if (r.eventId) {
+        String(r.eventId)
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .forEach((id) => eventIdSet.add(id));
+      }
+    });
+
+    if (eventIdSet.size === 0 && user.eventId) {
+      eventIdSet.add(user.eventId.trim());
+    }
+
+    const targetIds = Array.from(eventIdSet);
+    if (targetIds.length === 0) {
+      return [];
+    }
+
+    // 3. Fetch active events matching assigned IDs
+    const evRows = await sql`
+      SELECT id, name, subtitle, organizer, logo, "organizerLogo", banner, date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", "resultsDeclared", "declaredAt", "resultsPublished", "resultsPublishedAt", active, "createdAt", "updatedAt"
+      FROM "Event"
+      WHERE id = ANY(${targetIds}) AND active = true
+      ORDER BY "createdAt" ASC;
+    `;
+
+    if (evRows && evRows.length > 0) {
+      return evRows.map((e: any) => ({
+        id: e.id,
+        name: e.name || "Evaluation Event",
+        subtitle: e.subtitle || "",
+        organizer: e.organizer || "",
+        logo: e.logo || "",
+        organizerLogo: e.organizerLogo || "",
+        banner: e.banner || "",
+        date: e.date || "",
+        theme: e.theme || "",
+        status: e.status || "active",
+        timerDuration: e.timerDuration || 300,
+        judgingOpen: e.judgingOpen !== false,
+        leaderboardUnlocked: Boolean(e.leaderboardUnlocked),
+        finaleReady: Boolean(e.finaleReady),
+        resultsDeclared: Boolean(e.resultsDeclared),
+        declaredAt: e.declaredAt ? new Date(e.declaredAt).toISOString() : undefined,
+        resultsPublished: Boolean(e.resultsPublished),
+        resultsPublishedAt: e.resultsPublishedAt ? new Date(e.resultsPublishedAt).toISOString() : undefined,
+        active: e.active !== false,
+      }));
+    }
+
+    return [];
+  } catch (err: any) {
+    console.error("Neon DB Error (getJudgeAuthorizedEvents):", err);
+    return [];
+  }
+}
+
+/**
+ * Backend-secured data fetch for the Judge Evaluation Portal.
+ * Verifies that the requested event is in the judge's authorized events.
+ * If unauthorized or missing, securely clamps to the judge's primary authorized event.
+ * Returns authorized events, active event identity, teams, scores, and criteria in one roundtrip.
+ */
+export async function getJudgePortalData(
+  judgeId: string,
+  requestedEventId?: string
+): Promise<ActionResult<JudgePortalData>> {
+  try {
+    const authorizedEvents = await getJudgeAuthorizedEvents(judgeId);
+
+    if (authorizedEvents.length === 0) {
+      return {
+        success: false,
+        error: "NO_ASSIGNED_EVENTS: You are not currently assigned to any active evaluation events. Please contact the administrator.",
+      };
+    }
+
+    // Backend authorization security:
+    // If requestedEventId is among authorizedEvents, use it;
+    // Otherwise clamp securely to the judge's primary authorized event.
+    let effectiveEvent = authorizedEvents[0];
+    if (requestedEventId) {
+      const matched = authorizedEvents.find((e) => e.id === requestedEventId);
+      if (matched) {
+        effectiveEvent = matched;
+      }
+    }
+
+    const effectiveEventId = effectiveEvent.id;
+
+    // Fetch teams, scores, and criteria strictly scoped to this authorized event
+    const [teams, judgeScores, config] = await Promise.all([
+      getTeams(effectiveEventId),
+      getJudgeScores(judgeId, effectiveEventId),
+      getConfig(effectiveEventId),
+    ]);
+
+    return {
+      success: true,
+      data: {
+        authorizedEvents,
+        selectedEventId: effectiveEventId,
+        currentEvent: effectiveEvent,
+        teams: teams || [],
+        judgeScores: judgeScores || [],
+        criteriaList: config?.criteriaList || [],
+        judgingOpen: config?.judgingOpen !== false && effectiveEvent.judgingOpen !== false,
+        announceResults: Boolean(config?.announceResults),
+      },
+    };
+  } catch (err: any) {
+    console.error("Neon DB Error (getJudgePortalData):", err);
+    return {
+      success: false,
+      error: err?.message || "Failed to load judge evaluation portal data.",
+    };
   }
 }
 
