@@ -47,6 +47,54 @@ export async function initDatabase(): Promise<ActionResult> {
             logo = ''
         WHERE id = 'default_event' AND (name ILIKE '%PALS%' OR organizer ILIKE '%PALS%');
       `;
+
+      // Ensure at least one active event exists in Event table
+      const evCountCheck = await sql`SELECT count(*)::int as count FROM "Event" WHERE active = true;`;
+      if (!evCountCheck || evCountCheck[0]?.count === 0) {
+        const referencedEvents = await sql`
+          SELECT DISTINCT "eventId" as id FROM "Team" WHERE "eventId" IS NOT NULL AND "eventId" != ''
+          UNION
+          SELECT DISTINCT "eventId" as id FROM "User" WHERE "eventId" IS NOT NULL AND "eventId" != '' AND role != 'admin';
+        `;
+        const refIds = (referencedEvents || [])
+          .map((r: any) => r.id)
+          .filter((id: string) => id && !id.includes(','));
+
+        if (refIds.length > 0) {
+          for (const evId of refIds) {
+            await sql`
+              INSERT INTO "Event" (id, name, subtitle, organizer, status, active)
+              VALUES (${evId}, 'TechNova Hackathon', 'Collegiate Innovation Challenge', 'Computer Science Club', 'active', true)
+              ON CONFLICT (id) DO UPDATE SET active = true;
+            `;
+          }
+        } else {
+          await sql`
+            INSERT INTO "Event" (id, name, subtitle, organizer, logo, "organizerLogo", date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active)
+            VALUES ('default_event', 'TechNova Hackathon', 'Collegiate Innovation Challenge', 'Computer Science Club', '', '', '', '', 'active', 300, true, false, false, true)
+            ON CONFLICT (id) DO UPDATE SET active = true;
+          `;
+        }
+      }
+
+      // Auto-heal: Ensure any orphan event referenced by Team has an active Event row
+      const orphanTeamEvents = await sql`
+        SELECT DISTINCT "eventId" as id 
+        FROM "Team" 
+        WHERE "eventId" IS NOT NULL 
+          AND "eventId" != '' 
+          AND "eventId" NOT IN (SELECT id FROM "Event");
+      `;
+      for (const te of (orphanTeamEvents || [])) {
+        if (te.id && !te.id.includes(',')) {
+          await sql`
+            INSERT INTO "Event" (id, name, subtitle, organizer, status, active)
+            VALUES (${te.id}, 'TechNova Hackathon', 'Collegiate Innovation Challenge', 'Computer Science Club', 'active', true)
+            ON CONFLICT (id) DO UPDATE SET active = true;
+          `;
+        }
+      }
+
       tablesInitialized = true;
       return { success: true };
     }
@@ -425,29 +473,106 @@ export async function deleteEvent(eventId: string): Promise<ActionResult> {
       return { success: false, error: "VALIDATION_ERROR: Missing or invalid event identifier." };
     }
 
+    const cleanEventId = eventId.trim();
+
     // Verify event exists
     const evRows = await sql`
       SELECT id, name, "resultsPublished", "resultsDeclared" 
       FROM "Event" 
-      WHERE id = ${eventId} 
+      WHERE id = ${cleanEventId} 
       LIMIT 1;
     `;
-    if (!evRows || evRows.length === 0) {
-      return { success: false, error: "Event not found." };
+    const evName = evRows && evRows.length > 0 ? evRows[0].name : cleanEventId;
+
+    // 1. Identify all users in the system to determine cleanup eligibility
+    const allUsers = await sql`
+      SELECT id, name, email, role, "eventId"
+      FROM "User";
+    `;
+
+    // 2. Identify other active events in the system (excluding the one being deleted)
+    const otherActiveEvents = await sql`
+      SELECT id 
+      FROM "Event" 
+      WHERE id != ${cleanEventId} AND active = true;
+    `;
+    const otherActiveEventSet = new Set((otherActiveEvents || []).map((e: any) => e.id));
+
+    // 3. Classify users according to the strict business rules:
+    // - Case 3: Admin users -> NEVER delete.
+    // - Case 4: Users with no eventId -> DO NOT delete.
+    // - Users associated with deletedEventId:
+    //     - If they belong ONLY to deletedEventId (no other active events) -> DELETE user.
+    //     - If they belong to deletedEventId AND another active event -> KEEP user, update eventId.
+    const userIdsToDelete: string[] = [];
+    const usersToUpdateAssociation: { id: string; newEventId: string }[] = [];
+
+    for (const u of (allUsers || [])) {
+      // Rule: Protect admin at all costs
+      if (u.role === "admin") {
+        continue;
+      }
+
+      // Rule: Protect global users with no eventId
+      if (!u.eventId || String(u.eventId).trim() === "") {
+        continue;
+      }
+
+      const assignedIds = String(u.eventId)
+        .split(",")
+        .map((s: string) => s.trim())
+        .filter(Boolean);
+
+      // Check if user is associated with this deleted event
+      if (!assignedIds.includes(cleanEventId)) {
+        continue;
+      }
+
+      // Determine remaining active events for this user
+      const remainingAssigned = assignedIds.filter((id: string) => id !== cleanEventId);
+      const remainingActive = remainingAssigned.filter((id: string) => otherActiveEventSet.has(id));
+
+      if (remainingActive.length === 0) {
+        // Case 1: User belongs ONLY to deleted event -> Delete user
+        userIdsToDelete.push(u.id);
+      } else {
+        // Case 2: User belongs to deleted event AND another active event -> Keep user, strip deleted event association
+        usersToUpdateAssociation.push({
+          id: u.id,
+          newEventId: remainingAssigned.join(","),
+        });
+      }
     }
-    const ev = evRows[0];
 
-    // Atomically delete all event-scoped data in dependency-safe order
-    await (sql as any).transaction((tx: any) => [
-      tx`DELETE FROM "Score" WHERE "eventId" = ${eventId};`,
-      tx`DELETE FROM "Criteria" WHERE "eventId" = ${eventId};`,
-      tx`DELETE FROM "Team" WHERE "eventId" = ${eventId};`,
-      tx`DELETE FROM "User" WHERE "eventId" = ${eventId} AND role != 'admin';`,
-      tx`DELETE FROM "AuditLog" WHERE "eventId" = ${eventId};`,
-      tx`DELETE FROM "Event" WHERE id = ${eventId};`,
-    ]);
+    // 4. Atomically delete all event-scoped data in dependency-safe order
+    await (sql as any).transaction((tx: any) => {
+      const operations = [
+        tx`DELETE FROM "Score" WHERE "eventId" = ${cleanEventId};`,
+        tx`DELETE FROM "Criteria" WHERE "eventId" = ${cleanEventId};`,
+        tx`DELETE FROM "Team" WHERE "eventId" = ${cleanEventId};`,
+      ];
 
-    await logAudit("DELETE_EVENT", `Permanently deleted event "${ev.name}" (${eventId}) and all dependent records`);
+      // Update shared users to remove the deleted event association
+      for (const update of usersToUpdateAssociation) {
+        operations.push(
+          tx`UPDATE "User" SET "eventId" = ${update.newEventId}, "updatedAt" = NOW() WHERE id = ${update.id} AND role != 'admin';`
+        );
+      }
+
+      // Delete orphaned non-admin users belonging only to deleted event
+      if (userIdsToDelete.length > 0) {
+        operations.push(
+          tx`DELETE FROM "User" WHERE id = ANY(${userIdsToDelete}) AND role != 'admin';`
+        );
+      }
+
+      operations.push(tx`DELETE FROM "AuditLog" WHERE "eventId" = ${cleanEventId};`);
+      operations.push(tx`DELETE FROM "Event" WHERE id = ${cleanEventId};`);
+
+      return operations;
+    });
+
+    await logAudit("DELETE_EVENT", `Permanently deleted event "${evName}" (${cleanEventId}), cleaned up ${userIdsToDelete.length} event-owned users, preserved ${usersToUpdateAssociation.length} shared users`);
     await broadcastRealtimeEvent({ 
       table: "Event", 
       action: "DELETE_EVENT", 
@@ -471,10 +596,13 @@ export async function getJudges(eventId?: string): Promise<Judge[]> {
     const sql = getDb();
     let rows;
     if (eventId && eventId !== "all") {
+      const cleanId = eventId.trim();
       rows = await sql`
         SELECT id, name, email, "passwordHash", role, completed, "eventId"
         FROM "User" 
-        WHERE "eventId" = ${eventId} OR role = 'admin'
+        WHERE role = 'admin' 
+           OR "eventId" = ${cleanId} 
+           OR "eventId" ILIKE ${`%${cleanId}%`}
         ORDER BY name ASC;
       `;
     } else {
@@ -624,12 +752,41 @@ export async function getJudgeAuthorizedEvents(judgeId: string): Promise<EventIt
     }
 
     // 3. Fetch active events matching assigned IDs
-    const evRows = await sql`
+    let evRows = await sql`
       SELECT id, name, subtitle, organizer, logo, "organizerLogo", banner, date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", "resultsDeclared", "declaredAt", "resultsPublished", "resultsPublishedAt", active, "createdAt", "updatedAt"
       FROM "Event"
       WHERE id = ANY(${targetIds}) AND active = true
       ORDER BY "createdAt" ASC;
     `;
+
+    // Resilient fallback: if no active events found matching assigned IDs, check if any exist in Event table
+    if (!evRows || evRows.length === 0) {
+      evRows = await sql`
+        SELECT id, name, subtitle, organizer, logo, "organizerLogo", banner, date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", "resultsDeclared", "declaredAt", "resultsPublished", "resultsPublishedAt", active, "createdAt", "updatedAt"
+        FROM "Event"
+        WHERE id = ANY(${targetIds})
+        ORDER BY "createdAt" ASC;
+      `;
+    }
+
+    // Auto-heal missing Event rows for the judge's assigned event IDs
+    if ((!evRows || evRows.length === 0) && targetIds.length > 0) {
+      for (const missingId of targetIds) {
+        if (missingId && !missingId.includes(",")) {
+          await sql`
+            INSERT INTO "Event" (id, name, subtitle, organizer, status, active)
+            VALUES (${missingId}, 'TechNova Hackathon', 'Collegiate Innovation Challenge', 'Computer Science Club', 'active', true)
+            ON CONFLICT (id) DO UPDATE SET active = true;
+          `;
+        }
+      }
+      evRows = await sql`
+        SELECT id, name, subtitle, organizer, logo, "organizerLogo", banner, date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", "resultsDeclared", "declaredAt", "resultsPublished", "resultsPublishedAt", active, "createdAt", "updatedAt"
+        FROM "Event"
+        WHERE id = ANY(${targetIds})
+        ORDER BY "createdAt" ASC;
+      `;
+    }
 
     if (evRows && evRows.length > 0) {
       return evRows.map((e: any) => ({
@@ -687,7 +844,8 @@ export async function getJudgePortalData(
     // Otherwise clamp securely to the judge's primary authorized event.
     let effectiveEvent = authorizedEvents[0];
     if (requestedEventId) {
-      const matched = authorizedEvents.find((e) => e.id === requestedEventId);
+      const cleanRequested = requestedEventId.trim();
+      const matched = authorizedEvents.find((e) => e.id === cleanRequested);
       if (matched) {
         effectiveEvent = matched;
       }
@@ -733,12 +891,23 @@ export async function getTeams(eventId?: string): Promise<Team[]> {
     const sql = getDb();
     let rows;
     if (eventId && eventId !== "all") {
-      rows = await sql`
-        SELECT id, "teamName", "projectName", "teamCode", "tableNumber", members, "eventId", "createdAt" 
-        FROM "Team" 
-        WHERE "eventId" = ${eventId}
-        ORDER BY "teamName" ASC;
-      `;
+      const cleanEventId = eventId.trim();
+      if (cleanEventId.includes(",")) {
+        const evIds = cleanEventId.split(",").map((s) => s.trim()).filter(Boolean);
+        rows = await sql`
+          SELECT id, "teamName", "projectName", "teamCode", "tableNumber", members, "eventId", "createdAt" 
+          FROM "Team" 
+          WHERE TRIM("eventId") = ANY(${evIds})
+          ORDER BY "teamName" ASC;
+        `;
+      } else {
+        rows = await sql`
+          SELECT id, "teamName", "projectName", "teamCode", "tableNumber", members, "eventId", "createdAt" 
+          FROM "Team" 
+          WHERE TRIM("eventId") = ${cleanEventId}
+          ORDER BY "teamName" ASC;
+        `;
+      }
     } else {
       rows = await sql`
         SELECT id, "teamName", "projectName", "teamCode", "tableNumber", members, "eventId", "createdAt" 
@@ -747,6 +916,7 @@ export async function getTeams(eventId?: string): Promise<Team[]> {
       `;
     }
 
+    const cleanFallback = (eventId && eventId !== "all") ? eventId.trim() : 'default_event';
     return (rows || []).map((t: any) => ({
       id: t.id,
       name: t.teamName,
@@ -755,7 +925,7 @@ export async function getTeams(eventId?: string): Promise<Team[]> {
       teamCode: t.teamCode,
       tableNumber: t.tableNumber,
       members: t.members,
-      eventId: t.eventId || 'default_event',
+      eventId: t.eventId ? t.eventId.trim() : cleanFallback,
     }));
   } catch (error) {
     console.error("Neon DB Error (getTeams):", error);

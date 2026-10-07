@@ -405,7 +405,13 @@ export default function JudgeDashboardPage() {
   };
 
   // Filter teams strictly to the active event
-  const eventTeams = teams.filter((t) => !t.eventId || t.eventId === selectedEventId);
+  const activeEvId = currentEvent?.id || selectedEventId;
+  const eventTeams = teams.filter((t) => {
+    if (!t) return false;
+    if (!t.eventId) return true;
+    const cleanTeamEv = t.eventId.trim();
+    return cleanTeamEv === activeEvId || cleanTeamEv === selectedEventId || !activeEvId;
+  });
   const completedCount = eventTeams.filter((t) => isTeamCompleted(t.id)).length;
   const pendingCount = eventTeams.length - completedCount;
 
@@ -417,7 +423,7 @@ export default function JudgeDashboardPage() {
     if (statusFilter === "evaluated" && !isCompleted) return false;
 
     if (!normalizedQuery) return true;
-    const nameMatch = t.name.toLowerCase().includes(normalizedQuery);
+    const nameMatch = (t.name || t.teamName || "").toLowerCase().includes(normalizedQuery);
     const projMatch = t.projectName ? t.projectName.toLowerCase().includes(normalizedQuery) : false;
     const codeMatch = t.teamCode ? t.teamCode.toLowerCase().includes(normalizedQuery) : false;
     return nameMatch || projMatch || codeMatch;
