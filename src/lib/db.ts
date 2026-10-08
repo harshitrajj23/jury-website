@@ -13,7 +13,7 @@ export interface ActionResult<T = void> {
 
 let tablesInitialized = false;
 
-export const DEFAULT_CRITERIA_TEMPLATE = [
+const DEFAULT_CRITERIA_TEMPLATE = [
   { name: "Problem Solving & Innovation", description: "Creativity, novelty, and uniqueness of the solution", maxScore: 10, weight: 1.0, orderIndex: 0 },
   { name: "Technical Execution", description: "Architectural robustness, code quality, and implementation depth", maxScore: 10, weight: 1.0, orderIndex: 1 },
   { name: "Design & User Experience", description: "Intuitive UI, ergonomics, accessibility, and visual polish", maxScore: 10, weight: 1.0, orderIndex: 2 },
@@ -367,20 +367,28 @@ export async function createEvent(eventData: Partial<EventItem>): Promise<Action
     const status = (eventData.status || "active").trim();
     const timerDuration = Math.max(60, Math.min(3600, eventData.timerDuration || 300));
 
-    await sql`
-      INSERT INTO "Event" (id, name, subtitle, organizer, logo, "organizerLogo", banner, date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active, "createdAt", "updatedAt")
-      VALUES (${id}, ${name}, ${subtitle}, ${organizer}, ${logo}, ${organizerLogo}, ${banner}, ${date}, ${theme}, ${status}, ${timerDuration}, true, false, false, true, NOW(), NOW())
-    `;
+    // Atomically create Event and initialize isolated criteria in a single transaction
+    await (sql as any).transaction((tx: any) => {
+      const operations = [
+        tx`
+          INSERT INTO "Event" (id, name, subtitle, organizer, logo, "organizerLogo", banner, date, theme, status, "timerDuration", "judgingOpen", "leaderboardUnlocked", "finaleReady", active, "createdAt", "updatedAt")
+          VALUES (${id}, ${name}, ${subtitle}, ${organizer}, ${logo}, ${organizerLogo}, ${banner}, ${date}, ${theme}, ${status}, ${timerDuration}, true, false, false, true, NOW(), NOW())
+        `,
+      ];
 
-    // Seed isolated criteria for this new event
-    for (const c of DEFAULT_CRITERIA_TEMPLATE) {
-      const critId = `cr_${id}_${c.orderIndex}`;
-      await sql`
-        INSERT INTO "Criteria" (id, name, description, "maxScore", weight, "orderIndex", active, "eventId", "createdAt")
-        VALUES (${critId}, ${c.name}, ${c.description || ''}, ${c.maxScore || 10}, ${c.weight || 1.0}, ${c.orderIndex || 0}, true, ${id}, NOW())
-        ON CONFLICT (id) DO NOTHING;
-      `;
-    }
+      for (const c of DEFAULT_CRITERIA_TEMPLATE) {
+        const critId = `cr_${id}_${c.orderIndex}`;
+        operations.push(
+          tx`
+            INSERT INTO "Criteria" (id, name, description, "maxScore", weight, "orderIndex", active, "eventId", "createdAt")
+            VALUES (${critId}, ${c.name}, ${c.description || ''}, ${c.maxScore || 10}, ${c.weight || 1.0}, ${c.orderIndex || 0}, true, ${id}, NOW())
+            ON CONFLICT (id) DO NOTHING;
+          `
+        );
+      }
+
+      return operations;
+    });
 
     const created: EventItem = {
       id,
