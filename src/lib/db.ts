@@ -39,11 +39,12 @@ export async function initDatabase(): Promise<ActionResult> {
     // Ensure core schema and required multi-event columns exist
     if (check && check[0]?.count > 0) {
       await sql`
-        ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "organizerLogo" TEXT NOT NULL DEFAULT '';
-        ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "date" TEXT NOT NULL DEFAULT '';
-        ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "theme" TEXT NOT NULL DEFAULT '';
-        ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "status" TEXT NOT NULL DEFAULT 'active';
-        ALTER TABLE "Event" ADD COLUMN IF NOT EXISTS "banner" TEXT NOT NULL DEFAULT '';
+        ALTER TABLE "Event" 
+          ADD COLUMN IF NOT EXISTS "organizerLogo" TEXT NOT NULL DEFAULT '',
+          ADD COLUMN IF NOT EXISTS "date" TEXT NOT NULL DEFAULT '',
+          ADD COLUMN IF NOT EXISTS "theme" TEXT NOT NULL DEFAULT '',
+          ADD COLUMN IF NOT EXISTS "status" TEXT NOT NULL DEFAULT 'active',
+          ADD COLUMN IF NOT EXISTS "banner" TEXT NOT NULL DEFAULT '';
       `;
       // Clean up legacy organization-specific hardcoded default branding
       await sql`
