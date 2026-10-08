@@ -1029,30 +1029,14 @@ export async function getConfig(eventId: string = "default_event"): Promise<AppC
       sql`SELECT "leaderboardUnlocked", "judgingOpen", "finaleReady", "timerDuration" FROM "Settings" WHERE id = 'global' LIMIT 1;`,
     ]);
 
-    // Strictly scope criteria to eventId; auto-seed isolated criteria if event has none
+    // Strictly scope criteria to eventId (pure read operation, zero mutations)
     const cleanEventId = (eventId || "default_event").trim();
-    let criteriaRows = await sql`
+    const criteriaRows = await sql`
       SELECT id, name, description, "maxScore", weight, "orderIndex", active, "eventId" 
       FROM "Criteria" 
       WHERE active = true AND "eventId" = ${cleanEventId} 
       ORDER BY "orderIndex" ASC;
     `;
-    if (!criteriaRows || criteriaRows.length === 0) {
-      for (const t of DEFAULT_CRITERIA_TEMPLATE) {
-        const critId = `cr_${cleanEventId}_${t.orderIndex}`;
-        await sql`
-          INSERT INTO "Criteria" (id, name, description, "maxScore", weight, "orderIndex", active, "eventId", "createdAt")
-          VALUES (${critId}, ${t.name}, ${t.description}, ${t.maxScore}, ${t.weight}, ${t.orderIndex}, true, ${cleanEventId}, NOW())
-          ON CONFLICT (id) DO NOTHING;
-        `;
-      }
-      criteriaRows = await sql`
-        SELECT id, name, description, "maxScore", weight, "orderIndex", active, "eventId" 
-        FROM "Criteria" 
-        WHERE active = true AND "eventId" = ${cleanEventId} 
-        ORDER BY "orderIndex" ASC;
-      `;
-    }
 
     const ev = eventRows && eventRows.length > 0 ? eventRows[0] : null;
     const settings = settingsRows && settingsRows.length > 0 ? settingsRows[0] : { leaderboardUnlocked: false, judgingOpen: true, finaleReady: false, timerDuration: 300 };
