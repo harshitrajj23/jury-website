@@ -148,22 +148,38 @@ export default function AdminConsolePage() {
     }
   }, []);
 
-  const fetchDbData = async (eventId: string = selectedEventIdRef.current, isBackground = false) => {
+  const fetchDbData = async (requestedEventId: string = selectedEventIdRef.current, isBackground = false) => {
     if (!isBackground && isInitialLoadRef.current) {
       setDbLoading(true);
     }
     try {
-      const [eventsList, jList, tList, sList, config, lList] = await Promise.all([
-        getEvents(),
-        getJudges(eventId),
-        getTeams(eventId),
-        getScores(eventId),
-        getConfig(eventId),
-        getLeaderboard(eventId),
+      const eventsList = await getEvents();
+      setEvents(eventsList || []);
+
+      let effectiveEventId = requestedEventId;
+      if (eventsList && eventsList.length > 0) {
+        const found = eventsList.find((e) => e.id === requestedEventId);
+        if (found) {
+          effectiveEventId = found.id;
+        } else {
+          effectiveEventId = eventsList[0].id;
+        }
+      }
+
+      if (effectiveEventId !== selectedEventIdRef.current) {
+        setSelectedEventId(effectiveEventId);
+        selectedEventIdRef.current = effectiveEventId;
+      }
+
+      const [jList, tList, sList, config, lList] = await Promise.all([
+        getJudges(effectiveEventId),
+        getTeams(effectiveEventId),
+        getScores(effectiveEventId),
+        getConfig(effectiveEventId),
+        getLeaderboard(effectiveEventId),
       ]);
 
-      setEvents(eventsList || []);
-      const matchedEv = eventsList.find((e) => e.id === eventId) || config.event || null;
+      const matchedEv = (eventsList || []).find((e) => e.id === effectiveEventId) || config?.event || null;
       setCurrentEvent(matchedEv);
 
       setJudges(jList || []);
@@ -416,24 +432,57 @@ export default function AdminConsolePage() {
     setCriteria(updated);
   };
 
-  const handleRemoveCriteria = (id: string) => {
+  const handleRemoveCriteria = async (id: string) => {
     if (criteria.length <= 1) {
       alert("FAIL: AT LEAST ONE SCORING CRITERION MUST PERSIST.");
       return;
     }
-    setCriteria((prev) => prev.filter((c) => c.id !== id));
+    const updated = criteria.filter((c) => c.id !== id);
+    setCriteria(updated);
+    setActionLoading(true);
+    try {
+      const res = await updateCriteria(updated, selectedEventId);
+      if (res.success) {
+        await fetchDbData(selectedEventId, false);
+      } else {
+        alert(`FAIL: CONFIG TRANSMISSION FAILURE.\n\n${res.error}`);
+      }
+    } catch (err: any) {
+      alert(`FAIL: CONFIG TRANSMISSION FAILURE. (${err?.message || "Database error"})`);
+    } finally {
+      setActionLoading(false);
+    }
   };
 
-  const handleAddCriteria = (e: React.FormEvent) => {
+  const handleAddCriteria = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCriteriaName.trim()) return;
+    if (!newCriteriaName.trim() || actionLoading) return;
+    const cleanName = newCriteriaName.trim();
     const newCriteria: ScoringCriteria = {
       id: `c_${selectedEventId}_${Date.now()}`,
-      name: newCriteriaName.trim(),
+      name: cleanName,
+      maxScore: 10,
+      weight: 1.0,
+      orderIndex: criteria.length,
+      active: true,
       eventId: selectedEventId,
     };
-    setCriteria((prev) => [...prev, newCriteria]);
+    const updated = [...criteria, newCriteria];
+    setCriteria(updated);
     setNewCriteriaName("");
+    setActionLoading(true);
+    try {
+      const res = await updateCriteria(updated, selectedEventId);
+      if (res.success) {
+        await fetchDbData(selectedEventId, false);
+      } else {
+        alert(`FAIL: CONFIG TRANSMISSION FAILURE.\n\n${res.error}`);
+      }
+    } catch (err: any) {
+      alert(`FAIL: CONFIG TRANSMISSION FAILURE. (${err?.message || "Database error"})`);
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const handleSaveCriteria = async () => {
@@ -444,6 +493,7 @@ export default function AdminConsolePage() {
         alert(`FAIL: CONFIG TRANSMISSION FAILURE.\n\n${res.error}`);
         return;
       }
+      await fetchDbData(selectedEventId, false);
       alert("SYSTEM STATUS: SCORING PARAMETERS UPDATED FOR CURRENT EVENT.");
     } catch (err: any) {
       alert(`FAIL: CONFIG TRANSMISSION FAILURE. (${err?.message || "Database error"})`);

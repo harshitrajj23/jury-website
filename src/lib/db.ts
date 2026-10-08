@@ -13,6 +13,13 @@ export interface ActionResult<T = void> {
 
 let tablesInitialized = false;
 
+export const DEFAULT_CRITERIA_TEMPLATE = [
+  { name: "Problem Solving & Innovation", description: "Creativity, novelty, and uniqueness of the solution", maxScore: 10, weight: 1.0, orderIndex: 0 },
+  { name: "Technical Execution", description: "Architectural robustness, code quality, and implementation depth", maxScore: 10, weight: 1.0, orderIndex: 1 },
+  { name: "Design & User Experience", description: "Intuitive UI, ergonomics, accessibility, and visual polish", maxScore: 10, weight: 1.0, orderIndex: 2 },
+  { name: "Presentation & Delivery", description: "Clarity of communication, demo efficacy, and Q&A defense", maxScore: 10, weight: 1.0, orderIndex: 3 },
+];
+
 /**
  * Ensures native tables exist in Neon Postgres with Multi-Event architecture.
  * Guarded to run only once and avoid runtime DDL overhead.
@@ -214,6 +221,16 @@ export async function initDatabase(): Promise<ActionResult> {
       ON CONFLICT (id) DO NOTHING;
     `;
 
+    // Ensure base criteria exist in template event
+    for (const c of DEFAULT_CRITERIA_TEMPLATE) {
+      const critId = `cr_default_${c.orderIndex}`;
+      await sql`
+        INSERT INTO "Criteria" (id, name, description, "maxScore", weight, "orderIndex", active, "eventId", "createdAt")
+        VALUES (${critId}, ${c.name}, ${c.description}, ${c.maxScore}, ${c.weight}, ${c.orderIndex}, true, 'default_event', NOW())
+        ON CONFLICT (id) DO NOTHING;
+      `;
+    }
+
     tablesInitialized = true;
     return { success: true };
   } catch (err: any) {
@@ -355,21 +372,14 @@ export async function createEvent(eventData: Partial<EventItem>): Promise<Action
       VALUES (${id}, ${name}, ${subtitle}, ${organizer}, ${logo}, ${organizerLogo}, ${banner}, ${date}, ${theme}, ${status}, ${timerDuration}, true, false, false, true, NOW(), NOW())
     `;
 
-    // Clone base criteria for this event if template criteria exist
-    const baseCriteria = await sql`
-      SELECT name, description, "maxScore", weight, "orderIndex" 
-      FROM "Criteria" 
-      WHERE "eventId" = 'default_event' AND active = true;
-    `;
-    if (baseCriteria && baseCriteria.length > 0) {
-      for (const c of baseCriteria) {
-        const critId = `cr_${id}_${c.orderIndex}`;
-        await sql`
-          INSERT INTO "Criteria" (id, name, description, "maxScore", weight, "orderIndex", active, "eventId", "createdAt")
-          VALUES (${critId}, ${c.name}, ${c.description || ''}, ${c.maxScore || 10}, ${c.weight || 1.0}, ${c.orderIndex || 0}, true, ${id}, NOW())
-          ON CONFLICT (id) DO NOTHING;
-        `;
-      }
+    // Seed isolated criteria for this new event
+    for (const c of DEFAULT_CRITERIA_TEMPLATE) {
+      const critId = `cr_${id}_${c.orderIndex}`;
+      await sql`
+        INSERT INTO "Criteria" (id, name, description, "maxScore", weight, "orderIndex", active, "eventId", "createdAt")
+        VALUES (${critId}, ${c.name}, ${c.description || ''}, ${c.maxScore || 10}, ${c.weight || 1.0}, ${c.orderIndex || 0}, true, ${id}, NOW())
+        ON CONFLICT (id) DO NOTHING;
+      `;
     }
 
     const created: EventItem = {
@@ -1019,18 +1029,27 @@ export async function getConfig(eventId: string = "default_event"): Promise<AppC
       sql`SELECT "leaderboardUnlocked", "judgingOpen", "finaleReady", "timerDuration" FROM "Settings" WHERE id = 'global' LIMIT 1;`,
     ]);
 
-    // Strictly scope criteria to eventId; only use template if event has no custom criteria
+    // Strictly scope criteria to eventId; auto-seed isolated criteria if event has none
+    const cleanEventId = (eventId || "default_event").trim();
     let criteriaRows = await sql`
       SELECT id, name, description, "maxScore", weight, "orderIndex", active, "eventId" 
       FROM "Criteria" 
-      WHERE active = true AND "eventId" = ${eventId} 
+      WHERE active = true AND "eventId" = ${cleanEventId} 
       ORDER BY "orderIndex" ASC;
     `;
-    if ((!criteriaRows || criteriaRows.length === 0) && eventId !== "default_event") {
+    if (!criteriaRows || criteriaRows.length === 0) {
+      for (const t of DEFAULT_CRITERIA_TEMPLATE) {
+        const critId = `cr_${cleanEventId}_${t.orderIndex}`;
+        await sql`
+          INSERT INTO "Criteria" (id, name, description, "maxScore", weight, "orderIndex", active, "eventId", "createdAt")
+          VALUES (${critId}, ${t.name}, ${t.description}, ${t.maxScore}, ${t.weight}, ${t.orderIndex}, true, ${cleanEventId}, NOW())
+          ON CONFLICT (id) DO NOTHING;
+        `;
+      }
       criteriaRows = await sql`
         SELECT id, name, description, "maxScore", weight, "orderIndex", active, "eventId" 
         FROM "Criteria" 
-        WHERE active = true AND "eventId" = 'default_event' 
+        WHERE active = true AND "eventId" = ${cleanEventId} 
         ORDER BY "orderIndex" ASC;
       `;
     }
@@ -1350,6 +1369,7 @@ export async function getPublicResults(eventId: string = "default_event"): Promi
 export async function updateCriteria(criteriaList: ScoringCriteria[], eventId: string = "default_event"): Promise<ActionResult> {
   try {
     const sql = getDb();
+    const cleanEventId = (eventId || "default_event").trim();
 
     if (!criteriaList || criteriaList.length === 0) {
       return { success: false, error: "At least one scoring criterion is required." };
@@ -1360,12 +1380,12 @@ export async function updateCriteria(criteriaList: ScoringCriteria[], eventId: s
     // Upsert each criteria in list as active for this event
     for (let i = 0; i < criteriaList.length; i++) {
       const c = criteriaList[i];
-      const id = c.id || `crit_${eventId}_${Date.now()}_${i}`;
+      const id = c.id || `crit_${cleanEventId}_${Date.now()}_${i}`;
       activeIds.push(id);
 
       await sql`
         INSERT INTO "Criteria" (id, name, description, "maxScore", weight, "orderIndex", active, "eventId", "createdAt")
-        VALUES (${id}, ${c.name}, ${c.description || ''}, ${c.maxScore || 10}, ${c.weight || 1.0}, ${i}, true, ${eventId}, NOW())
+        VALUES (${id}, ${c.name}, ${c.description || ''}, ${c.maxScore || 10}, ${c.weight || 1.0}, ${i}, true, ${cleanEventId}, NOW())
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name,
           description = EXCLUDED.description,
@@ -1382,12 +1402,12 @@ export async function updateCriteria(criteriaList: ScoringCriteria[], eventId: s
       await sql`
         UPDATE "Criteria" 
         SET active = false 
-        WHERE "eventId" = ${eventId} AND id != ALL(${activeIds}::text[]);
+        WHERE "eventId" = ${cleanEventId} AND id != ALL(${activeIds}::text[]);
       `;
     }
 
-    await logAudit("UPDATE_CRITERIA", `Updated ${criteriaList.length} criteria for event ${eventId}`, undefined, eventId);
-    await broadcastRealtimeEvent({ table: "Criteria", action: "UPDATE_CRITERIA", eventId });
+    await logAudit("UPDATE_CRITERIA", `Updated ${criteriaList.length} criteria for event ${cleanEventId}`, undefined, cleanEventId);
+    await broadcastRealtimeEvent({ table: "Criteria", action: "UPDATE_CRITERIA", eventId: cleanEventId });
     return { success: true };
   } catch (err: any) {
     console.error("Neon DB Error (updateCriteria):", err);

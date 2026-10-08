@@ -975,6 +975,11 @@ export default function JudgeDashboardPage() {
 
               {/* 1-10 Numeric Score Input Boxes */}
               <div className="flex flex-col gap-4 py-1">
+                {criteria.length === 0 && (
+                  <div className="p-6 text-center border border-cyber-cyan/20 bg-cyber-bg-darker/60 font-mono text-xs text-gray-400">
+                    NO ACTIVE SCORING CRITERIA CONFIGURED FOR THIS EVENT. PLEASE CONTACT THE ADMINISTRATOR.
+                  </div>
+                )}
                 {criteria.map((c, index) => {
                   const scoreVal = evaluationScores[c.id] ?? 5;
                   const strVal = scoreInputs[c.id] !== undefined ? scoreInputs[c.id] : String(scoreVal);

@@ -60,13 +60,17 @@ function LeaderboardContent() {
   const fetchLeaderboard = useCallback(async (eventId: string = selectedEventId) => {
     setRefreshing(true);
     try {
-      const [eventsList, publicRes] = await Promise.all([
-        getEvents(),
-        getPublicResults(eventId),
-      ]);
-
+      const eventsList = await getEvents();
       setEvents(eventsList || []);
-      const matched = eventsList.find((e) => e.id === eventId) || publicRes.event || null;
+
+      let effectiveEventId = eventId;
+      if (eventsList && eventsList.length > 0 && !eventsList.some((e) => e.id === eventId)) {
+        effectiveEventId = eventsList[0].id;
+        setSelectedEventId(effectiveEventId);
+      }
+
+      const publicRes = await getPublicResults(effectiveEventId);
+      const matched = (eventsList || []).find((e) => e.id === effectiveEventId) || publicRes.event || null;
       setCurrentEvent(matched);
 
       setAnnounced(publicRes.published);
